@@ -1,0 +1,14 @@
+[project]
+name = "simli-python-sdk-starter"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+dependencies = [
+    "aiortc",
+    "websockets",
+    "httpx",
+    "numpy",
+]
+
+[tool.uv]
+dev-dependencies = []
