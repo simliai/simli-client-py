@@ -6,9 +6,10 @@ readme = "README.md"
 dependencies = [
     "aiortc",
     "websockets",
-    "httpx",
-    "numpy",
+    "requests",
 ]
 
 [tool.uv]
-dev-dependencies = []
+dev-dependencies = [
+    "python-dotenv",
+]
