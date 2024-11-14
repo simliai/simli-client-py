@@ -1,5 +1,5 @@
 [project]
-name = "simli-python-sdk-starter"
+name = "simli"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
