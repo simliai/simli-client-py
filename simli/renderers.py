@@ -9,8 +9,41 @@ import av.video
 from .simli import SimliClient
 
 
-class NPArrayRenderer:
-    pass
+class NDArrayRenderer:
+    def __init__(self, client: SimliClient):
+        try:
+            import numpy as np
+        except ImportError:
+            raise ImportError(
+                "numpy is required for NPArrayRenderer, Install optional dependencies using \n\"pip install 'simli[processing]'\""
+            )
+        self.client = client
+        self.videoBuffer: list[np.ndarray] = []
+        self.audioBuffer: list[np.ndarray] = []
+        self.video: np.ndarray = None
+        self.audio: np.ndarray = None
+        self.np = np
+
+    async def render(self):
+        videoEncodeTask = asyncio.create_task(self.getVideo())
+        audioEncodeTask = asyncio.create_task(self.getAudio())
+        await asyncio.gather(videoEncodeTask, audioEncodeTask)
+        self.video = self.np.array(self.videoBuffer)
+        self.audio = self.np.concat(self.audioBuffer, axis=1)
+        return self.video, self.audio
+
+    async def getVideo(self):
+        async for frame in self.client.getVideoStreamIterator("rgb24"):
+            if frame is None:
+                break
+            self.videoBuffer.append(frame.to_ndarray())
+
+    async def getAudio(self):
+        async for frame in self.client.getAudioStreamIterator():
+            if frame is None:
+                break
+
+            self.audioBuffer.append(frame.to_ndarray().reshape(2, -1))
 
 
 class FileRenderer:
@@ -78,7 +111,7 @@ class LocalRenderer:
     def __init__(self, client: SimliClient, windowName: str = "Simli"):
         try:
             import cv2
-            import pyaudio  # type: ignore # noqa: F821
+            import pyaudio
         except ImportError:
             raise ImportError(
                 "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli[local]'\""
@@ -94,8 +127,8 @@ class LocalRenderer:
         self.audioFormat = pyaudio.paInt16
         self.audioChannels = 2
         self.audioRate = 48000
-        self.pyaudio = pyaudio.PyAudio()
-        self.audioOutput = self.pyaudio.open(
+        self.pyaudioInstance = pyaudio.PyAudio()
+        self.audioOutput = self.pyaudioInstance.open(
             format=self.audioFormat,
             channels=self.audioChannels,
             rate=self.audioRate,
@@ -103,6 +136,8 @@ class LocalRenderer:
             frames_per_buffer=1024,
         )
         self.audioBuffer = []
+        self.cv2 = cv2
+        self.pyaudio = pyaudio
 
     async def render(self):
         """
@@ -115,16 +150,19 @@ class LocalRenderer:
     async def displayVideo(self):
         async for frame in self.client.getVideoStreamIterator("rgb24"):
             if frame is None:
-                cv2.destroyAllWindows()  # type: ignore # noqa: F821
+                self.cv2.destroyAllWindows()
                 break
             self.videoBuffer.append(frame.to_ndarray())
-            cv2.imshow("Simli", cv2.cvtColor(self.videoBuffer[0], cv2.COLOR_RGB2BGR))  # type: ignore # noqa: F821
+            self.cv2.imshow(
+                "Simli", self.cv2.cvtColor(self.videoBuffer[0], self.cv2.COLOR_RGB2BGR)
+            )
             self.videoBuffer.pop(0)
-            cv2.waitKey(1)  # type: ignore # noqa: F821
+            self.cv2.waitKey(1)
 
     async def playAudio(self):
         async for frame in self.client.getAudioStreamIterator():
             if frame is None:
+                self.audioOutput.close()
                 break
             self.audioBuffer.append(frame.to_ndarray())
             self.audioOutput.write(self.audioBuffer[0].tobytes())

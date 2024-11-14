@@ -63,7 +63,12 @@ class SimliClient:
     For more information on the Simli API, visit https://docs.simli.com/
     """
 
-    def __init__(self, config: SimliConfig, userTrunServer: bool = False):
+    def __init__(
+        self,
+        config: SimliConfig,
+        useTrunServer: bool = False,
+        latencyInterval: int = 60,
+    ):
         """
         :param config: SimliConfig object containing the API Key and Face ID and other optional parameters for the Simli API refer to https://docs.simli.com for more information
         :param useTrunServer: Whether to use the TURN server provided by the Simli API, if set to False, the default STUN server will be used, use only if you are having issues with the default STUN server
@@ -77,11 +82,11 @@ class SimliClient:
         self.receiverTask: asyncio.Task = None
         self.pingTask: asyncio.Task = None
         self.stopping = False
-        self.useTrunServer: bool = False
+        self.useTrunServer: bool = useTrunServer
+        self.latencyInterval = latencyInterval
 
     async def Initialize(
         self,
-        latencyInterval: int = 60,
     ):
         """
         Start Simli Connection
@@ -138,8 +143,8 @@ class SimliClient:
             self.ready = True
         await self.pc.setRemoteDescription(RTCSessionDescription(**json.loads(answer)))
         self.receiverTask = asyncio.create_task(self.handleMessages())
-        if latencyInterval > 0:
-            self.pingTask = asyncio.create_task(self.ping(latencyInterval))
+        if self.latencyInterval > 0:
+            self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
 
     def registerTrack(self, track: MediaStreamTrack):
         print("Registering track", track.kind)
@@ -260,6 +265,8 @@ class SimliClient:
                     )
             except asyncio.TimeoutError:
                 return
+            if frame is None:
+                return
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
             yield frame
@@ -283,6 +290,8 @@ class SimliClient:
                         self.audioReceiver.recv(), timeout=0.04
                     )
             except asyncio.TimeoutError:
+                return
+            if frame is None:
                 return
             if resampler:
                 frame = resampler.resample(frame)[0]

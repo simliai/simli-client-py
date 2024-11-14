@@ -1,12 +1,12 @@
 import asyncio
 from simli import SimliClient, SimliConfig
-from simli.renderers import FileRenderer
+from simli.renderers import NDArrayRenderer
 import os
 from dotenv import load_dotenv
 
 load_dotenv(".env")
 
-with open("audio2.raw", "rb") as f:
+with open("test_audio.raw", "rb") as f:
     audio = f.read()
 
 
@@ -21,7 +21,8 @@ async def main():
     ) as connection:
         await connection.send(audio)
         await connection.sendSilence()
-        await FileRenderer(connection).render()
+        videoOut, audioOut = await NDArrayRenderer(connection).render()
+        print(videoOut.shape, audioOut.shape)
         print("Done")
         await connection.stop()
 
