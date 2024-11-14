@@ -2,3 +2,6 @@
 __pycache__
 *.egg-info
 *env*
+*.mp4
+test_*.mp3
+test_*.wav

@@ -215,10 +215,7 @@ class SimliClient:
             self.receiverTask.cancel()
             if self.pingTask:
                 self.pingTask.cancel()
-
-            print("AAAAA")
             await self.pc.close()
-            print("BBBBB")
         except Exception:
             import traceback
 
@@ -230,8 +227,8 @@ class SimliClient:
         """
         if not self.ready:
             raise Exception("WSDC Not ready, please wait until self.ready is True")
-
-        await self.wsConnection.send(data)
+        for i in range(0, len(data), 6000):
+            await self.wsConnection.send(data[i : i + 6000])
 
     async def sendSilence(self, duration: float = 0.1875):
         """
@@ -252,8 +249,17 @@ class SimliClient:
 
         Refer to https://pyav.org for more information on the available formats
         """
-        while self.run:
-            frame = await self.videoReceiver.recv()
+        first = True
+        while True:
+            try:
+                if first:
+                    frame = await self.videoReceiver.recv()
+                else:
+                    frame = await asyncio.wait_for(
+                        self.videoReceiver.recv(), timeout=1 / 15
+                    )
+            except asyncio.TimeoutError:
+                return
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
             yield frame
@@ -267,8 +273,17 @@ class SimliClient:
             resampler = AudioResampler(
                 format="s16", layout="stereo", rate=targetSampleRate
             )
-        while self.run:
-            frame = await self.audioReceiver.recv()
+        first = True
+        while True:
+            try:
+                if first:
+                    frame = await self.audioReceiver.recv()
+                else:
+                    frame = await asyncio.wait_for(
+                        self.audioReceiver.recv(), timeout=0.04
+                    )
+            except asyncio.TimeoutError:
+                return
             if resampler:
                 frame = resampler.resample(frame)[0]
             yield frame

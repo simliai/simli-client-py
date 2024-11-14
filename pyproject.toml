@@ -9,7 +9,18 @@ dependencies = [
     "requests",
 ]
 
+[project.optional-dependencies]
+local = [
+    "opencv-python",
+    "pyaudio",
+]
+processing = [
+    "numpy",
+]
+
 [tool.uv]
 dev-dependencies = [
     "python-dotenv",
+    "ruff",
+    "uv",
 ]
