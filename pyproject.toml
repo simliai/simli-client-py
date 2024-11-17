@@ -1,6 +1,6 @@
 [project]
 name = "simli-ai"
-version = "0.1.2"
+version = "0.1.3"
 description = "Add your description here"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -21,6 +21,7 @@ daily = [
     "daily-python>=0.13.0",
 ]
 livekit = [
+    "livekit-api>=0.8.0",
     "livekit>=0.18.1",
 ]
 

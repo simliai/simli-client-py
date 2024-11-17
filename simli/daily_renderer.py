@@ -8,7 +8,7 @@ try:
     from daily import *  # noqa: F403
 except ImportError:
     raise ImportError(
-        "daily is required for DailyRenderer, Install optional dependencies using \n\"pip install 'simli[daily]'\""
+        "daily is required for DailyRenderer, Install optional dependencies using \n\"pip install 'simli-ai[daily]'\""
     )
 
 Daily.init()  # noqa: F405
@@ -19,6 +19,7 @@ class DailyRenderer:
         self,
         client: SimliClient,
         meeting_url: str,
+        dailyClient: CallClient,  # noqa: F405
         meeting_token: str = None,
         videoWidth=512,
         videoHeight=512,
@@ -49,9 +50,9 @@ class DailyRenderer:
             videoHeight,
             color_format="RGB",
         )
-        self.dailyClient = CallClient()  # noqa: F405
+        self.dailyClient = dailyClient
         self.dailyClient.update_subscription_profiles(
-            {"base": {"camera": "unsubscribed", "microphone": "unsubscribed"}}
+            {"base": {"camera": "unsubscribed", "microphone": "subscribed"}}
         )
 
         if client_settings is None:

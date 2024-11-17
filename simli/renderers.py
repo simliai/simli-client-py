@@ -14,12 +14,8 @@ from .livekit_renderer import LivekitRenderer
 
 class NDArrayRenderer:
     def __init__(self, client: SimliClient):
-        try:
-            import numpy as np
-        except ImportError:
-            raise ImportError(
-                "numpy is required for NPArrayRenderer, Install optional dependencies using \n\"pip install 'simli[processing]'\""
-            )
+        import numpy as np
+
         self.client = client
         self.videoBuffer: list[np.ndarray] = []
         self.audioBuffer: list[np.ndarray] = []
@@ -117,7 +113,7 @@ class LocalRenderer:
             import pyaudio
         except ImportError:
             raise ImportError(
-                "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli[local]'\""
+                "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli-ai[local]'\""
             )
 
         self.client = client
