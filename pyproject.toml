@@ -17,6 +17,12 @@ local = [
     "opencv-python",
     "pyaudio",
 ]
+daily = [
+    "daily-python>=0.13.0",
+]
+livekit = [
+    "livekit>=0.18.1",
+]
 
 [tool.uv]
 dev-dependencies = [

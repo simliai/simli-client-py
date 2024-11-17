@@ -205,6 +205,17 @@ wheels = [
 ]
 
 [[package]]
+name = "daily-python"
+version = "0.13.0"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/4f/69/b88d5264e3dce3207ec3bf78f47b9516d014459434fb29aba0ced61b4f81/daily_python-0.13.0-cp37-abi3-macosx_10_12_x86_64.whl", hash = "sha256:f2d2fc996c5d27865f87b2c45e4510bfc3cce7c0e20f6cf6e11f59df1413e1f7", size = 12723415 },
+    { url = "https://files.pythonhosted.org/packages/8c/10/90b1bd3c5856b1588bed65e806934ca38d3f932aa9edf9beedcd811b1e02/daily_python-0.13.0-cp37-abi3-macosx_11_0_arm64.whl", hash = "sha256:57d8913a5f87ce2013d48e27249accd7a4d40454abf6000e6599735336df37de", size = 11039054 },
+    { url = "https://files.pythonhosted.org/packages/3a/24/9a851d3dbe14b61b807d4cdf3c5a22dc00cfc18c4970fd19d1ce7e2bb95f/daily_python-0.13.0-cp37-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:9e9d42193ed7e5f0e9363cda6106d2e13044d5ed9ef4fbed80f5f8f2b8329c8f", size = 13319080 },
+    { url = "https://files.pythonhosted.org/packages/4d/ba/43be60cb5f261dc836038b9bf893639cff47435be3d86ce0e8183331d5d2/daily_python-0.13.0-cp37-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:36905a71883297ac1ecdfe8dad7557d97e83c63d01087e9baf96cfd8b88e3b60", size = 13857189 },
+]
+
+[[package]]
 name = "dnspython"
 version = "2.7.0"
 source = { registry = "https://pypi.org/simple" }
@@ -247,6 +258,23 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/e8/ac/fb4c578f4a3256561548cd825646680edcadb9440f3f68add95ade1eb791/ifaddr-0.2.0.tar.gz", hash = "sha256:cc0cbfcaabf765d44595825fb96a99bb12c79716b73b44330ea38ee2b0c4aed4", size = 10485 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/9c/1f/19ebc343cc71a7ffa78f17018535adc5cbdd87afb31d7c34874680148b32/ifaddr-0.2.0-py3-none-any.whl", hash = "sha256:085e0305cfe6f16ab12d72e2024030f5d52674afad6911bb1eee207177b8a748", size = 12314 },
+]
+
+[[package]]
+name = "livekit"
+version = "0.18.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "protobuf" },
+    { name = "types-protobuf" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/7b/74/108736aa9a76e45c45b0de22a404b3ac17e71241e5909196b7abc193bbdd/livekit-0.18.1.tar.gz", hash = "sha256:9263858f35602d6a473c81bf71a406e3fa6e135f6b0b7a6b38e3a91c7099923f", size = 91222 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/d7/1b78cda4a8fbe2811b5916c3aeb6bbf126ecf3896cfc6bc639a94215d7fc/livekit-0.18.1-py3-none-macosx_10_9_x86_64.whl", hash = "sha256:07377f10bf41f75383d542a206e5081594f2bbf702a986bce144d1bc3ea8623b", size = 10606993 },
+    { url = "https://files.pythonhosted.org/packages/42/25/6198326a35365b78c52f9e1d995310192b4660a84ddbd424b187b77c3c77/livekit-0.18.1-py3-none-macosx_11_0_arm64.whl", hash = "sha256:40a4bd1bf94faf429e7b88d4cb838710299b5a80ce465f0b1528a7ab27aa9106", size = 9261412 },
+    { url = "https://files.pythonhosted.org/packages/07/47/d5a39c8f4dcb761afcc486720281ef253ae1291707bdebc3eea1060ce465/livekit-0.18.1-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:80078ae3c0b5f91ce7d67887369797bcc481d76634beb7533f8d15782821f155", size = 10168741 },
+    { url = "https://files.pythonhosted.org/packages/91/11/853e6f8b42592bbca5b9acc94ed7f489438e2e4d076d921b509dc815d7ca/livekit-0.18.1-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:d3701c7d1979b961bc95400ea773b6a1cff5c501b460fd0eb8ee36995227964d", size = 11686295 },
+    { url = "https://files.pythonhosted.org/packages/c6/17/b3187a21d67503b6f9a0008858f08f0ba5c16cb8fb5bbc14980fc9260531/livekit-0.18.1-py3-none-win_amd64.whl", hash = "sha256:ccbeeff47fd02d419582ef64c9aa84d61ca94eaf2f0614cb78618dfe578c86ba", size = 10351752 },
 ]
 
 [[package]]
@@ -312,6 +340,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/3f/a4/d2537f47fd7fcfba966bd806e3ec18e7ee1681056d4b0a9c8d983983e4d5/opencv_python-4.10.0.84-cp37-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9ace140fc6d647fbe1c692bcb2abce768973491222c067c131d80957c595b71f", size = 62548253 },
     { url = "https://files.pythonhosted.org/packages/1e/39/bbf57e7b9dab623e8773f6ff36385456b7ae7fa9357a5e53db732c347eac/opencv_python-4.10.0.84-cp37-abi3-win32.whl", hash = "sha256:2db02bb7e50b703f0a2d50c50ced72e95c574e1e5a0bb35a8a86d0b35c98c236", size = 28737688 },
     { url = "https://files.pythonhosted.org/packages/ec/6c/fab8113424af5049f85717e8e527ca3773299a3c6b02506e66436e19874f/opencv_python-4.10.0.84-cp37-abi3-win_amd64.whl", hash = "sha256:32dbbd94c26f611dc5cc6979e6b7aa1f55a64d6b463cc1dcd3c95505a63e48fe", size = 38842521 },
+]
+
+[[package]]
+name = "protobuf"
+version = "5.28.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/74/6e/e69eb906fddcb38f8530a12f4b410699972ab7ced4e21524ece9d546ac27/protobuf-5.28.3.tar.gz", hash = "sha256:64badbc49180a5e401f373f9ce7ab1d18b63f7dd4a9cdc43c92b9f0b481cef7b", size = 422479 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d1/c5/05163fad52d7c43e124a545f1372d18266db36036377ad29de4271134a6a/protobuf-5.28.3-cp310-abi3-win32.whl", hash = "sha256:0c4eec6f987338617072592b97943fdbe30d019c56126493111cf24344c1cc24", size = 419624 },
+    { url = "https://files.pythonhosted.org/packages/9c/4c/4563ebe001ff30dca9d7ed12e471fa098d9759712980cde1fd03a3a44fb7/protobuf-5.28.3-cp310-abi3-win_amd64.whl", hash = "sha256:91fba8f445723fcf400fdbe9ca796b19d3b1242cd873907979b9ed71e4afe868", size = 431464 },
+    { url = "https://files.pythonhosted.org/packages/1c/f2/baf397f3dd1d3e4af7e3f5a0382b868d25ac068eefe1ebde05132333436c/protobuf-5.28.3-cp38-abi3-macosx_10_9_universal2.whl", hash = "sha256:a3f6857551e53ce35e60b403b8a27b0295f7d6eb63d10484f12bc6879c715687", size = 414743 },
+    { url = "https://files.pythonhosted.org/packages/85/50/cd61a358ba1601f40e7d38bcfba22e053f40ef2c50d55b55926aecc8fec7/protobuf-5.28.3-cp38-abi3-manylinux2014_aarch64.whl", hash = "sha256:3fa2de6b8b29d12c61911505d893afe7320ce7ccba4df913e2971461fa36d584", size = 316511 },
+    { url = "https://files.pythonhosted.org/packages/5d/ae/3257b09328c0b4e59535e497b0c7537d4954038bdd53a2f0d2f49d15a7c4/protobuf-5.28.3-cp38-abi3-manylinux2014_x86_64.whl", hash = "sha256:712319fbdddb46f21abb66cd33cb9e491a5763b2febd8f228251add221981135", size = 316624 },
+    { url = "https://files.pythonhosted.org/packages/ad/c3/2377c159e28ea89a91cf1ca223f827ae8deccb2c9c401e5ca233cd73002f/protobuf-5.28.3-py3-none-any.whl", hash = "sha256:cee1757663fa32a1ee673434fcf3bf24dd54763c79690201208bafec62f19eed", size = 169511 },
 ]
 
 [[package]]
@@ -438,6 +480,12 @@ dependencies = [
 ]
 
 [package.optional-dependencies]
+daily = [
+    { name = "daily-python" },
+]
+livekit = [
+    { name = "livekit" },
+]
 local = [
     { name = "opencv-python" },
     { name = "pyaudio" },
@@ -453,6 +501,8 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "aiortc" },
+    { name = "daily-python", marker = "extra == 'daily'", specifier = ">=0.13.0" },
+    { name = "livekit", marker = "extra == 'livekit'", specifier = ">=0.18.1" },
     { name = "numpy", specifier = ">=2.1.3" },
     { name = "opencv-python", marker = "extra == 'local'" },
     { name = "pyaudio", marker = "extra == 'local'" },
@@ -465,6 +515,15 @@ dev = [
     { name = "python-dotenv" },
     { name = "ruff" },
     { name = "uv" },
+]
+
+[[package]]
+name = "types-protobuf"
+version = "5.28.3.20241030"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c8/d4/d186e43cfb38ecefc91315ee9193d5722a88d7a3c8eac34a3ed603377407/types-protobuf-5.28.3.20241030.tar.gz", hash = "sha256:f7e6b45845d75393fb41c0b3ce82c46d775f9771fae2097414a1dbfe5b51a988", size = 54665 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/72/da/c261bb44799d3f4455fc881ca342c14f5b5b23878bef568a1cdcd324e62f/types_protobuf-5.28.3.20241030-py3-none-any.whl", hash = "sha256:f3dae16adf342d4fb5bb3673cabb22549a6252e5dd66fc52d8310b1a39c64ba9", size = 68781 },
 ]
 
 [[package]]
