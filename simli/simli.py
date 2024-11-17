@@ -143,6 +143,7 @@ class SimliClient:
             self.ready = True
         await self.pc.setRemoteDescription(RTCSessionDescription(**json.loads(answer)))
         self.receiverTask = asyncio.create_task(self.handleMessages())
+
         if self.latencyInterval > 0:
             self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
 
@@ -166,7 +167,9 @@ class SimliClient:
             message = await self.wsConnection.recv()
             if message == "STOP":
                 self.run = False
-                print("Terminating session due to STOP message")
+                print(
+                    "Closing session due to hitting the max session length or max idle time"
+                )
                 await self.stop()
                 break
 
@@ -191,7 +194,7 @@ class SimliClient:
             await self.send(f"ping {pingTime}")
             await asyncio.sleep(interval)
 
-    async def stop(self):
+    async def stop(self, drain=False):
         """
         Gracefully terminates the connection
         """
@@ -203,13 +206,17 @@ class SimliClient:
         except Exception:
             pass
         try:
-            while await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03):
+            while (
+                await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03) and drain
+            ):
                 continue
 
         except asyncio.TimeoutError:
             pass
         try:
-            while await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03):
+            while (
+                await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03) and drain
+            ):
                 continue
         except asyncio.TimeoutError:
             pass
@@ -232,8 +239,15 @@ class SimliClient:
         """
         if not self.ready:
             raise Exception("WSDC Not ready, please wait until self.ready is True")
-        for i in range(0, len(data), 6000):
-            await self.wsConnection.send(data[i : i + 6000])
+
+        try:
+            for i in range(0, len(data), 6000):
+                await self.wsConnection.send(data[i : i + 6000])
+        except websockets.WebSocketException:
+            print(
+                "Websocket closed, stopping, please check the logs for more information"
+            )
+            await self.stop()
 
     async def sendSilence(self, duration: float = 0.1875):
         """

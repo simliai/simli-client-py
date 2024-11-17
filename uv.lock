@@ -442,9 +442,6 @@ local = [
     { name = "opencv-python" },
     { name = "pyaudio" },
 ]
-processing = [
-    { name = "numpy" },
-]
 
 [package.dev-dependencies]
 dev = [
@@ -457,7 +454,6 @@ dev = [
 requires-dist = [
     { name = "aiortc" },
     { name = "numpy", specifier = ">=2.1.3" },
-    { name = "numpy", marker = "extra == 'processing'" },
     { name = "opencv-python", marker = "extra == 'local'" },
     { name = "pyaudio", marker = "extra == 'local'" },
     { name = "requests" },
