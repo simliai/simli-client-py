@@ -50,6 +50,7 @@ class LivekitRenderer:
         await asyncio.gather(self.PublishVideo(), self.PublishAudio())
 
     async def PublishVideo(self):
+        s = time.time()
         async for frame in self.client.getVideoStreamIterator("yuva420p"):
             if frame is None:
                 break
@@ -63,6 +64,8 @@ class LivekitRenderer:
             self.videoSource.capture_frame(
                 frameLivekit, timestamp_us=int(frame.time * (10**6))
             )
+            await asyncio.sleep(1 / 30 - (time.time() - s))
+            s = time.time()
 
     async def PublishAudio(self):
         async for frame in self.client.getAudioStreamIterator():
