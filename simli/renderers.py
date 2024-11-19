@@ -8,9 +8,6 @@ import av.video
 
 from .simli import SimliClient
 
-from .daily_renderer import DailyRenderer
-from .livekit_renderer import LivekitRenderer
-
 
 class NDArrayRenderer:
     def __init__(self, client: SimliClient):
@@ -172,6 +169,4 @@ __all__ = [
     "NDArrayRenderer",
     "FileRenderer",
     "LocalRenderer",
-    "DailyRenderer",
-    "LivekitRenderer",
 ]
