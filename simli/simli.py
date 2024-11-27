@@ -152,6 +152,7 @@ class SimliClient:
         await self.wsConnection.send(json.dumps(jsonOffer))
         await self.wsConnection.recv()  # ACK
         answer = await self.wsConnection.recv()  # ANSWER
+
         await self.wsConnection.send(self.session_token)
         await self.wsConnection.recv()  # ACK
         ready = await self.wsConnection.recv()  # START MESSAGE
@@ -248,15 +249,10 @@ class SimliClient:
             if self.pingTask:
                 self.pingTask.cancel()
             print("Websocket closed")
-            if (
-                self.pc.connectionState != "closed"
-                or self.pc.connectionState != "failed"
-            ):
+            if self.pc.connectionState != "closed":
                 await self.pc.close()
         except Exception:
-            import traceback
-
-            traceback.print_exc()
+            pass
 
     async def send(self, data: str | bytes):
         """
