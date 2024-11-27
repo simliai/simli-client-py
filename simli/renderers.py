@@ -61,6 +61,7 @@ class FileRenderer:
         self.filename = filename
         self.videoCodec = videoCodec
         self.audioCodec = audioCodec
+        self.syncLock = False
 
     async def render(self):
         """
@@ -79,7 +80,11 @@ class FileRenderer:
         self.container.close()
 
     async def encodeVideo(self):
+        firstFrame = True
         async for frame in self.client.getVideoStreamIterator("yuva420p"):
+            if firstFrame:
+                firstFrame = False
+                self.syncLock = True
             if frame is None:
                 break
             self.videoStream.width = frame.width
@@ -90,6 +95,9 @@ class FileRenderer:
             self.container.mux(packet)
 
     async def encodeAudio(self):
+        while not self.syncLock:
+            await asyncio.sleep(0.001)
+
         async for frame in self.client.getAudioStreamIterator():
             if frame is None:
                 break

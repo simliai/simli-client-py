@@ -31,6 +31,7 @@ class VideoFrameReceiver(MediaStreamTrack):
 
     def __init__(self, source: VideoStreamTrack):
         self.source = source
+        self.__ended = False
 
     async def recv(self) -> VideoFrame:
         try:
@@ -52,6 +53,7 @@ class AudioFrameReceiver(MediaStreamTrack):
     def __init__(self, source: AudioStreamTrack):
         super().__init__()
         self.source = source
+        self.__ended = False
 
     async def recv(self) -> AudioFrame:
         try:
@@ -221,18 +223,22 @@ class SimliClient:
             pass
         try:
             while (
-                await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03) and drain
+                self.audioReceiver.readyState != "ended"
+                and await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03)
+                and drain
             ):
                 continue
 
-        except asyncio.TimeoutError:
+        except Exception:
             pass
         try:
             while (
-                await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03) and drain
+                self.videoReceiver.readyState != "ended"
+                and await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03)
+                and drain
             ):
                 continue
-        except asyncio.TimeoutError:
+        except Exception:
             pass
 
         try:
@@ -298,6 +304,9 @@ class SimliClient:
             except asyncio.TimeoutError:
                 print("Video Stream Timed Out")
                 return
+            except Exception:
+                print("Video Stream Ended")
+                return
             if frame is None:
                 print("Video Stream Ended")
                 return
@@ -324,6 +333,9 @@ class SimliClient:
                     frame = await asyncio.wait_for(self.audioReceiver.recv(), timeout=1)
             except asyncio.TimeoutError:
                 print("Audio Stream Timed Out")
+                return
+            except Exception:
+                print("Audio Stream Ended")
                 return
             if frame is None:
                 print("Audio Stream Ended")
