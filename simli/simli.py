@@ -35,9 +35,14 @@ class VideoFrameReceiver(MediaStreamTrack):
     async def recv(self) -> VideoFrame:
         try:
             frame: VideoFrame = await self.source.recv()
+            if frame is None:
+                self.source.stop()
+                self.stop()
+                return None
             return frame
-        except Exception as e:
-            print(e)
+        except Exception:
+            self.stop()
+            self.source.stop()
             return None
 
 
@@ -51,9 +56,14 @@ class AudioFrameReceiver(MediaStreamTrack):
     async def recv(self) -> AudioFrame:
         try:
             frame: AudioFrame = await self.source.recv()
+            if frame is None:
+                self.stop()
+                self.source.stop()
+                return None
             return frame
-        except Exception as e:
-            print(e)
+        except Exception:
+            self.stop()
+            self.source.stop()
             return None
 
 
@@ -68,11 +78,13 @@ class SimliClient:
         config: SimliConfig,
         useTrunServer: bool = False,
         latencyInterval: int = 60,
+        simliURL: str = "https://api.simli.ai",
     ):
         """
         :param config: SimliConfig object containing the API Key and Face ID and other optional parameters for the Simli API refer to https://docs.simli.com for more information
         :param useTrunServer: Whether to use the TURN server provided by the Simli API, if set to False, the default STUN server will be used, use only if you are having issues with the default STUN server
-
+        :param latencyInterval: Interval between pings to measure the latency between the client and the simli servers in seconds, set to 0 to disable
+        :param simliURL: The URL of the Simli API, defaults to api.simli.ai. Don't change it unless you know what you are doing.
         """
         self.config = config
         self.pc: RTCPeerConnection = None
@@ -84,6 +96,8 @@ class SimliClient:
         self.stopping = False
         self.useTrunServer: bool = useTrunServer
         self.latencyInterval = latencyInterval
+        self.simliHTTPURL = simliURL
+        self.simliWSURL = simliURL.replace("http", "ws")
 
     async def Initialize(
         self,
@@ -96,13 +110,13 @@ class SimliClient:
         configJson = self.config.__dict__
 
         response = requests.post(
-            "https://api.simli.ai/startAudioToVideoSession", json=configJson
+            f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
         )
         response.raise_for_status()
         self.session_token = response.json()["session_token"]
         if self.useTrunServer:
             self.iceJSON = requests.post(
-                "https://api.simli.ai/getIceServers",
+                f"{self.simliHTTPURL}/getIceServers",
                 json={"apiKey": self.config.apiKey},
             )
             self.iceJSON.raise_for_status()
@@ -130,7 +144,7 @@ class SimliClient:
 
         jsonOffer = self.pc.localDescription.__dict__
         self.wsConnection: websockets.asyncio.client.ClientConnection = (
-            websockets.asyncio.client.connect("wss://api.simli.ai/StartWebRTCSession")
+            websockets.asyncio.client.connect(f"{self.simliWSURL}/StartWebRTCSession")
         )
         self.wsConnection = await self.wsConnection.__aenter__()
         await self.wsConnection.send(json.dumps(jsonOffer))
@@ -227,7 +241,12 @@ class SimliClient:
             self.receiverTask.cancel()
             if self.pingTask:
                 self.pingTask.cancel()
-            await self.pc.close()
+            print("Websocket closed")
+            if (
+                self.pc.connectionState != "closed"
+                or self.pc.connectionState != "failed"
+            ):
+                await self.pc.close()
         except Exception:
             import traceback
 
@@ -273,13 +292,14 @@ class SimliClient:
             try:
                 if first:
                     frame = await self.videoReceiver.recv()
+                    first = False
                 else:
-                    frame = await asyncio.wait_for(
-                        self.videoReceiver.recv(), timeout=1 / 15
-                    )
+                    frame = await asyncio.wait_for(self.videoReceiver.recv(), timeout=1)
             except asyncio.TimeoutError:
+                print("Video Stream Timed Out")
                 return
             if frame is None:
+                print("Video Stream Ended")
                 return
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
@@ -299,13 +319,14 @@ class SimliClient:
             try:
                 if first:
                     frame = await self.audioReceiver.recv()
+                    first = False
                 else:
-                    frame = await asyncio.wait_for(
-                        self.audioReceiver.recv(), timeout=0.04
-                    )
+                    frame = await asyncio.wait_for(self.audioReceiver.recv(), timeout=1)
             except asyncio.TimeoutError:
+                print("Audio Stream Timed Out")
                 return
             if frame is None:
+                print("Audio Stream Ended")
                 return
             if resampler:
                 frame = resampler.resample(frame)[0]
