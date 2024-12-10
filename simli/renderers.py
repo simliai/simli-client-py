@@ -53,6 +53,7 @@ class FileRenderer:
         filename: str = "output.mp4",
         videoCodec: str = "h264",
         audioCodec: str = "aac",
+        outputFormat: str | None = "mp4",
     ):
         self.client = client
         self.videoStream: av.video.VideoStream
@@ -61,13 +62,14 @@ class FileRenderer:
         self.filename = filename
         self.videoCodec = videoCodec
         self.audioCodec = audioCodec
+        self.outputFormat = outputFormat
         self.syncLock = False
 
     async def render(self):
         """
         Start rendering the video and audio stream to the file.
         """
-        self.container = av.open(self.filename, "w")
+        self.container = av.open(self.filename, "w", format=self.outputFormat)
 
         self.videoStream = self.container.add_stream(self.videoCodec, rate=30)
         self.videoStream.pix_fmt = "yuv420p"
