@@ -1,6 +1,4 @@
 import asyncio
-import time
-
 from av.audio.frame import AudioFrame
 from av.video.frame import VideoFrame
 from . import SimliClient
@@ -44,13 +42,18 @@ class LivekitRenderer:
             simulcast=True,
             video_encoding=rtc.VideoEncoding(
                 max_framerate=FPS,
-                max_bitrate=3_000_000,
+                max_bitrate=1_500_000,
             ),
         )
-        self.CameraOptions.source = rtc.TrackSource.SOURCE_CAMERA
         self.MicrophoneOptions = rtc.TrackPublishOptions()
         self.MicrophoneOptions.source = rtc.TrackSource.SOURCE_MICROPHONE
         self.lastTimestamp = 0
+        self.avSynchronizer = rtc.AVSynchronizer(
+            audio_source=self.audioSource,
+            video_source=self.videoSource,
+            video_fps=FPS,
+            video_queue_size_ms=100,
+        )
 
     async def InitLivekit(self):
         await self.room.connect(url=self.room_url, token=self.room_token)
@@ -65,9 +68,8 @@ class LivekitRenderer:
     async def render(self):
         self.videoQueue: asyncio.Queue[VideoFrame] = asyncio.Queue()
         self.audioQueue: asyncio.Queue[AudioFrame] = asyncio.Queue()
+
         await asyncio.gather(
-            self.PublishVideo(),
-            self.PublishAudio(),
             self.PopulateVideoQueue(),
             self.PopulateAudioQueue(),
         )
@@ -75,21 +77,7 @@ class LivekitRenderer:
     async def PopulateVideoQueue(self):
         async for frame in self.client.getVideoStreamIterator("yuva420p"):
             if frame is None:
-                break
-            await self.videoQueue.put(frame)
-            print("Video Queue Size:", self.videoQueue.qsize())
-
-    async def PopulateAudioQueue(self):
-        async for frame in self.client.getAudioStreamIterator():
-            if frame is None:
-                break
-            await self.audioQueue.put(frame)
-            print("Audio Queue Size:", self.audioQueue.qsize())
-
-    async def PublishVideo(self):
-        next_frame_time = time.perf_counter()
-        while (frame := await self.videoQueue.get()) is not None:
-            if frame is None:
+                print("Video Queue Empty")
                 break
             frameLivekit = rtc.VideoFrame(
                 frame.width,
@@ -97,15 +85,13 @@ class LivekitRenderer:
                 rtc.VideoBufferType.I420A,
                 frame.to_ndarray().tobytes(),
             )
-            self.videoSource.capture_frame(
-                frameLivekit,
-            )
-            next_frame_time += 1 / FPS
-            self.lastTimestamp = frame.time
-            await asyncio.sleep(next_frame_time - time.perf_counter())
+            await self.avSynchronizer.push(frameLivekit)
 
-    async def PublishAudio(self):
-        while (frame := await self.audioQueue.get()) is not None:
-            frameMat = frame.to_ndarray()
-            frame = rtc.AudioFrame(frameMat.tobytes(), 48000, 2, frameMat.shape[1] // 2)
-            await self.audioSource.capture_frame(frame)
+    async def PopulateAudioQueue(self):
+        async for frame in self.client.getAudioStreamIterator():
+            if frame is None:
+                break
+            frame = frame.to_ndarray()
+            await self.avSynchronizer.push(
+                rtc.AudioFrame(frame.tobytes(), 48000, 2, frame.shape[1] // 2)
+            )
