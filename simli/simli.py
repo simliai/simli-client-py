@@ -100,6 +100,8 @@ class SimliClient:
         self.latencyInterval = latencyInterval
         self.simliHTTPURL = simliURL
         self.simliWSURL = simliURL.replace("http", "ws")
+        self.tryCount = 3
+        self.failErorr = None
 
     async def Initialize(
         self,
@@ -109,60 +111,74 @@ class SimliClient:
 
         :param get_latency: Interval between pings to measure the latency between the client and the simli servers in seconds, set to 0 to disable
         """
-        configJson = self.config.__dict__
-
-        response = requests.post(
-            f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
-        )
-        response.raise_for_status()
-        self.session_token = response.json()["session_token"]
-        if self.useTrunServer:
-            self.iceJSON = requests.post(
-                f"{self.simliHTTPURL}/getIceServers",
-                json={"apiKey": self.config.apiKey},
+        if self.tryCount == 0:
+            raise Exception(
+                "Failed to connect to the Simli servers. Last known fail reason: "
+                + self.failErorr.__repr__()
             )
-            self.iceJSON.raise_for_status()
-            self.iceJSON = self.iceJSON.json()
-            self.iceConfig = []
-            for server in self.iceJSON:
-                self.iceConfig.append(RTCIceServer(**server))
-        else:
-            self.iceConfig = [
-                RTCIceServer(
-                    urls=[
-                        "stun:stun.l.google.com:19302",
-                    ]
+        try:
+            configJson = self.config.__dict__
+
+            response = requests.post(
+                f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
+            )
+            response.raise_for_status()
+            self.session_token = response.json()["session_token"]
+            if self.useTrunServer:
+                self.iceJSON = requests.post(
+                    f"{self.simliHTTPURL}/getIceServers",
+                    json={"apiKey": self.config.apiKey},
                 )
-            ]
-        self.pc = RTCPeerConnection(RTCConfiguration(iceServers=self.iceConfig))
-        self.pc.addTransceiver("audio", direction="recvonly")
-        self.pc.addTransceiver("video", direction="recvonly")
-        self.pc.on("track", self.registerTrack)
-        self.dc = self.pc.createDataChannel("datachannel", ordered=True)
+                self.iceJSON.raise_for_status()
+                self.iceJSON = self.iceJSON.json()
+                self.iceConfig = []
+                for server in self.iceJSON:
+                    self.iceConfig.append(RTCIceServer(**server))
+            else:
+                self.iceConfig = [
+                    RTCIceServer(
+                        urls=[
+                            "stun:stun.l.google.com:19302",
+                        ]
+                    )
+                ]
+            self.pc = RTCPeerConnection(RTCConfiguration(iceServers=self.iceConfig))
+            self.pc.addTransceiver("audio", direction="recvonly")
+            self.pc.addTransceiver("video", direction="recvonly")
+            self.pc.on("track", self.registerTrack)
+            self.dc = self.pc.createDataChannel("datachannel", ordered=True)
 
-        await self.pc.setLocalDescription(await self.pc.createOffer())
-        while self.pc.iceGatheringState != "complete":
-            await asyncio.sleep(0.001)
+            await self.pc.setLocalDescription(await self.pc.createOffer())
+            while self.pc.iceGatheringState != "complete":
+                await asyncio.sleep(0.001)
 
-        jsonOffer = self.pc.localDescription.__dict__
-        self.wsConnection: websockets.asyncio.client.ClientConnection = (
-            websockets.asyncio.client.connect(f"{self.simliWSURL}/StartWebRTCSession")
-        )
-        self.wsConnection = await self.wsConnection.__aenter__()
-        await self.wsConnection.send(json.dumps(jsonOffer))
-        await self.wsConnection.recv()  # ACK
-        answer = await self.wsConnection.recv()  # ANSWER
+            jsonOffer = self.pc.localDescription.__dict__
+            self.wsConnection: websockets.asyncio.client.ClientConnection = (
+                websockets.asyncio.client.connect(
+                    f"{self.simliWSURL}/StartWebRTCSession"
+                )
+            )
+            self.wsConnection = await self.wsConnection.__aenter__()
+            await self.wsConnection.send(json.dumps(jsonOffer))
+            await self.wsConnection.recv()  # ACK
+            answer = await self.wsConnection.recv()  # ANSWER
 
-        await self.wsConnection.send(self.session_token)
-        await self.wsConnection.recv()  # ACK
-        ready = await self.wsConnection.recv()  # START MESSAGE
-        if ready == "START":
-            self.ready = True
-        await self.pc.setRemoteDescription(RTCSessionDescription(**json.loads(answer)))
-        self.receiverTask = asyncio.create_task(self.handleMessages())
+            await self.wsConnection.send(self.session_token)
+            await self.wsConnection.recv()  # ACK
+            ready = await self.wsConnection.recv()  # START MESSAGE
+            if ready == "START":
+                self.ready = True
+            await self.pc.setRemoteDescription(
+                RTCSessionDescription(**json.loads(answer))
+            )
+            self.receiverTask = asyncio.create_task(self.handleMessages())
 
-        if self.latencyInterval > 0:
-            self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
+            if self.latencyInterval > 0:
+                self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
+        except Exception as e:
+            self.failErorr = e
+            self.tryCount -= 1
+            await self.Initialize()
 
     def registerTrack(self, track: MediaStreamTrack):
         print("Registering track", track.kind)

@@ -55,6 +55,15 @@ class LivekitRenderer:
             video_queue_size_ms=100,
         )
 
+        self.videoSource.capture_frame(
+            rtc.VideoFrame(
+                width,
+                height,
+                rtc.VideoBufferType.I420A,
+                (0).to_bytes(768 * 512, "little"),
+            )
+        )
+
     async def InitLivekit(self):
         await self.room.connect(url=self.room_url, token=self.room_token)
         await self.room.local_participant.publish_track(
