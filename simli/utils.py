@@ -3,7 +3,7 @@ import base64
 import av
 import numpy as np
 
-audioResampler = av.AudioResampler(format="s16", layout=1, rate=16000)
+audioResampler = av.AudioResampler(format="s16", layout="mono", rate=16000)
 
 
 def load_audio_file(filePath: str) -> bytes:
