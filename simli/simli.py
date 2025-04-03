@@ -2,8 +2,10 @@ import time
 import asyncio
 import json
 from dataclasses import dataclass
+from typing import Awaitable, Optional
 
-import requests
+
+from httpx import AsyncClient, Response
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
@@ -91,7 +93,7 @@ class SimliClient:
         self.config = config
         self.pc: RTCPeerConnection = None
         self.iceConfig: list[RTCIceServer] = None
-        self.ready = False
+        self.ready = asyncio.Event()
         self.run = True
         self.receiverTask: asyncio.Task = None
         self.pingTask: asyncio.Task = None
@@ -102,6 +104,8 @@ class SimliClient:
         self.simliWSURL = simliURL.replace("http", "ws")
         self.tryCount = 3
         self.failErorr = None
+        self.speak_event: Optional[Awaitable] = None
+        self.silent_event: Optional[Awaitable] = None
 
     async def Initialize(
         self,
@@ -118,30 +122,42 @@ class SimliClient:
             )
         try:
             configJson = self.config.__dict__
-
-            response = requests.post(
-                f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
-            )
-            response.raise_for_status()
-            self.session_token = response.json()["session_token"]
-            if self.useTrunServer:
-                self.iceJSON = requests.post(
-                    f"{self.simliHTTPURL}/getIceServers",
-                    json={"apiKey": self.config.apiKey},
-                )
-                self.iceJSON.raise_for_status()
-                self.iceJSON = self.iceJSON.json()
-                self.iceConfig = []
-                for server in self.iceJSON:
-                    self.iceConfig.append(RTCIceServer(**server))
-            else:
-                self.iceConfig = [
-                    RTCIceServer(
-                        urls=[
-                            "stun:stun.l.google.com:19302",
-                        ]
+            async with AsyncClient() as client:
+                requests = []
+                requests.append(
+                    client.post(
+                        f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
                     )
-                ]
+                )
+                if self.useTrunServer:
+                    requests.append(
+                        client.post(
+                            f"{self.simliHTTPURL}/getIceServers",
+                            json={"apiKey": self.config.apiKey},
+                        )
+                    )
+
+                else:
+                    self.iceConfig = [
+                        RTCIceServer(
+                            urls=[
+                                "stun:stun.l.google.com:19302",
+                            ]
+                        )
+                    ]
+
+                responses = await asyncio.gather(*requests)
+                session_token_response: Response = responses[0]
+                session_token_response.raise_for_status()
+                self.session_token = session_token_response.json()["session_token"]
+                if self.useTrunServer:
+                    self.iceJSON: Response = responses[1]
+                    self.iceJSON.raise_for_status()
+                    self.iceJSON = self.iceJSON.json()
+                    self.iceConfig = []
+                    for server in self.iceJSON:
+                        self.iceConfig.append(RTCIceServer(**server))
+
             self.pc = RTCPeerConnection(RTCConfiguration(iceServers=self.iceConfig))
             self.pc.addTransceiver("audio", direction="recvonly")
             self.pc.addTransceiver("video", direction="recvonly")
@@ -167,7 +183,7 @@ class SimliClient:
             await self.wsConnection.recv()  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
             if ready == "START":
-                self.ready = True
+                self.ready.set()
             await self.pc.setRemoteDescription(
                 RTCSessionDescription(**json.loads(answer))
             )
@@ -194,9 +210,7 @@ class SimliClient:
         Internal: Handles messages from the websocket connection. Called in the Initialize function
         """
         while self.run:
-            if not self.ready:
-                await asyncio.sleep(0.001)
-                continue
+            await self.ready.wait()
             message = await self.wsConnection.recv()
             if message == "STOP":
                 self.run = False
@@ -215,8 +229,36 @@ class SimliClient:
                 pingTime = float(message.split(" ")[1])
                 print(f"Ping: {time.time() - pingTime}")
 
+            elif message == "SILENT" and self.silent_event is not None:
+                await self.silent_event()
+
+            elif message == "SPEAK" and self.speak_event is not None:
+                await self.speak_event()
+
             elif message != "ACK":
                 print(message)
+
+    def registerSpeakEventCallback(self, async_callback: Awaitable):
+        """
+        Example:
+        ```
+        async def callback():
+            print("SPEAK")
+        simliClient.registerSpeakEventCallback(callback)
+        ```
+        """
+        self.speak_event = async_callback
+
+    def registerSilentEventCallback(self, async_callback: Awaitable):
+        """
+        Example:
+        ```
+        async def callback():
+            print("SILENT")
+        simliClient.registerSpeakEventCallback(callback)
+        ```
+        """
+        self.silent_event = async_callback
 
     async def ping(self, interval: int):
         """
@@ -235,7 +277,7 @@ class SimliClient:
             return
         self.stopping = True
         try:
-            await self.wsConnection.send("DONE")
+            await self.wsConnection.send(b"DONE")
         except Exception:
             pass
         try:
@@ -274,7 +316,7 @@ class SimliClient:
         """
         Sends Audio data or control messages to the simli servers
         """
-        if not self.ready:
+        if not self.ready.is_set():
             raise Exception("WSDC Not ready, please wait until self.ready is True")
 
         try:
@@ -305,6 +347,7 @@ class SimliClient:
 
         Refer to https://pyav.org for more information on the available formats
         """
+        await self.ready.wait()
         first = True
         while True:
             try:

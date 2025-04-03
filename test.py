@@ -10,6 +10,14 @@ with open("test_audio.raw", "rb") as f:
     audio = f.read()
 
 
+async def speakCallback():
+    print("SPEAK CALLBACK")
+
+
+async def silentCallback():
+    print("SILENT CALLBACK")
+
+
 async def main():
     async with SimliClient(
         SimliConfig(
@@ -17,8 +25,10 @@ async def main():
             os.getenv("SIMLI_FACE_ID", ""),  # Face ID
             maxSessionLength=20,
             maxIdleTime=10,
-        )
+        ),
     ) as connection:
+        connection.registerSilentEventCallback(silentCallback)
+        connection.registerSpeakEventCallback(speakCallback)
         await connection.send(audio)
         await connection.sendSilence()
         videoOut, audioOut = await NDArrayRenderer(connection).render()

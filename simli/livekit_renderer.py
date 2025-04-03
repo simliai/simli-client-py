@@ -28,7 +28,8 @@ class LivekitRenderer:
         self.room = room
         self.room_url = room_url
         self.room_token = room_token
-
+        self.width = width
+        self.height = height
         self.videoSource = rtc.VideoSource(width, height)
         self.audioSource = rtc.AudioSource(48000, 2, 20)
         self.videoTrack = rtc.LocalVideoTrack.create_video_track(
@@ -54,11 +55,10 @@ class LivekitRenderer:
             video_fps=FPS,
             video_queue_size_ms=100,
         )
-
         self.videoSource.capture_frame(
             rtc.VideoFrame(
-                width,
-                height,
+                self.width,
+                self.height,
                 rtc.VideoBufferType.I420A,
                 (0).to_bytes(768 * 512, "little"),
             )
@@ -77,7 +77,6 @@ class LivekitRenderer:
     async def render(self):
         self.videoQueue: asyncio.Queue[VideoFrame] = asyncio.Queue()
         self.audioQueue: asyncio.Queue[AudioFrame] = asyncio.Queue()
-
         await asyncio.gather(
             self.PopulateVideoQueue(),
             self.PopulateAudioQueue(),
