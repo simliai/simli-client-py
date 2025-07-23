@@ -20,6 +20,18 @@ import websockets.asyncio.client
 
 @dataclass
 class SimliConfig:
+    """
+    Args:
+        apiKey (str): Simli API Key
+        faceId (str): Simli Face ID. If using Trinity, you need to specify "faceId/emotionId" in the faceId field to use a different emotion than the default
+        handleSilence (bool): Simli server keeps sending silent video when the input buffer is fully depleted. Turning this off makes the video freeze when you don't send in anything
+        maxSessionLength (int):
+            Absolute maximum session duration, avatar will disconnect after this time
+            even if it's speaking.
+        maxIdleTime (int):
+            Maximum duration the avatar is not speaking for before the avatar disconnects.
+    """
+
     apiKey: str
     faceId: str
     syncAudio: bool = True
