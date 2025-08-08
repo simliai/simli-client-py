@@ -1,3 +1,4 @@
+from enum import Enum
 import time
 import asyncio
 import json
@@ -16,6 +17,11 @@ from aiortc.mediastreams import MediaStreamTrack, VideoStreamTrack, AudioStreamT
 from av import VideoFrame, AudioFrame
 from av.audio.resampler import AudioResampler
 import websockets.asyncio.client
+
+
+class SimliModels(str, Enum):
+    fasttalk = "fasttalk"
+    artalk = "artalk"
 
 
 @dataclass
@@ -38,6 +44,7 @@ class SimliConfig:
     handleSilence: bool = True
     maxSessionLength: int = 600
     maxIdleTime: int = 30
+    model: SimliModels = SimliModels.fasttalk
 
 
 class VideoFrameReceiver(MediaStreamTrack):
