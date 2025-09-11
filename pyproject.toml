@@ -1,6 +1,6 @@
 [project]
 name = "simli-ai"
-version = "0.1.14"
+version = "0.1.17"
 description = "Add your description here"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -10,7 +10,7 @@ dependencies = [
     "websockets",
     "httpx",
     "numpy",
-    "av>=14.2.0",
+    "av>=13",
 ]
 
 [project.optional-dependencies]

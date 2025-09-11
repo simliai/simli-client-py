@@ -199,13 +199,13 @@ class SimliClient:
             answer = await self.wsConnection.recv()  # ANSWER
 
             await self.wsConnection.send(self.session_token)
+            await self.pc.setRemoteDescription(
+                RTCSessionDescription(**json.loads(answer))
+            )
             await self.wsConnection.recv()  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
             if ready == "START":
                 self.ready.set()
-            await self.pc.setRemoteDescription(
-                RTCSessionDescription(**json.loads(answer))
-            )
             self.receiverTask = asyncio.create_task(self.handleMessages())
 
             if self.latencyInterval > 0:
@@ -368,10 +368,12 @@ class SimliClient:
         """
         await self.ready.wait()
         first = True
+        s = time.time()
         while True:
             try:
                 if first:
                     frame = await self.videoReceiver.recv()
+                    print(time.time() - s)
                     first = False
                 else:
                     frame = await asyncio.wait_for(self.videoReceiver.recv(), timeout=1)
