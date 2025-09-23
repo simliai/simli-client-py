@@ -13,7 +13,8 @@ from aiortc import (
     RTCIceServer,
     RTCConfiguration,
 )
-from aiortc.mediastreams import MediaStreamTrack, VideoStreamTrack, AudioStreamTrack
+from aiortc.mediastreams import MediaStreamTrack
+from aiortc.rtcrtpreceiver import RemoteStreamTrack
 from av import VideoFrame, AudioFrame
 from av.audio.resampler import AudioResampler
 import websockets.asyncio.client
@@ -50,17 +51,13 @@ class SimliConfig:
 class VideoFrameReceiver(MediaStreamTrack):
     kind = "video"
 
-    def __init__(self, source: VideoStreamTrack):
+    def __init__(self, source: RemoteStreamTrack):
         self.source = source
         self.__ended = False
 
     async def recv(self) -> VideoFrame:
         try:
             frame: VideoFrame = await self.source.recv()
-            if frame is None:
-                self.source.stop()
-                self.stop()
-                return None
             return frame
         except Exception:
             self.stop()
@@ -71,7 +68,7 @@ class VideoFrameReceiver(MediaStreamTrack):
 class AudioFrameReceiver(MediaStreamTrack):
     kind = "audio"
 
-    def __init__(self, source: AudioStreamTrack):
+    def __init__(self, source: RemoteStreamTrack):
         super().__init__()
         self.source = source
         self.__ended = False
@@ -79,10 +76,7 @@ class AudioFrameReceiver(MediaStreamTrack):
     async def recv(self) -> AudioFrame:
         try:
             frame: AudioFrame = await self.source.recv()
-            if frame is None:
-                self.stop()
-                self.source.stop()
-                return None
+
             return frame
         except Exception:
             self.stop()
@@ -197,16 +191,16 @@ class SimliClient:
             await self.wsConnection.send(json.dumps(jsonOffer))
             await self.wsConnection.recv()  # ACK
             answer = await self.wsConnection.recv()  # ANSWER
+            answer = RTCSessionDescription(**json.loads(answer))
 
             await self.wsConnection.send(self.session_token)
-            await self.pc.setRemoteDescription(
-                RTCSessionDescription(**json.loads(answer))
-            )
+            await self.pc.setRemoteDescription(answer)
             await self.wsConnection.recv()  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
             if ready == "START":
                 self.ready.set()
             self.receiverTask = asyncio.create_task(self.handleMessages())
+            await self.sendSilence(1)
 
             if self.latencyInterval > 0:
                 self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
@@ -371,17 +365,12 @@ class SimliClient:
         s = time.time()
         while True:
             try:
+                frame = await self.videoReceiver.recv()
                 if first:
-                    frame = await self.videoReceiver.recv()
                     print(time.time() - s)
                     first = False
-                else:
-                    frame = await asyncio.wait_for(self.videoReceiver.recv(), timeout=1)
-            except asyncio.TimeoutError:
-                print("Video Stream Timed Out")
-                return
-            except Exception:
-                print("Video Stream Ended")
+            except Exception as e:
+                print("Video Stream Ended due to exception", e)
                 return
             if frame is None:
                 print("Video Stream Ended")
@@ -399,26 +388,21 @@ class SimliClient:
             resampler = AudioResampler(
                 format="s16", layout="stereo", rate=targetSampleRate
             )
-        first = True
         while True:
             try:
-                if first:
-                    frame = await self.audioReceiver.recv()
-                    first = False
-                else:
-                    frame = await asyncio.wait_for(self.audioReceiver.recv(), timeout=1)
-            except asyncio.TimeoutError:
-                print("Audio Stream Timed Out")
-                return
-            except Exception:
-                print("Audio Stream Ended")
+                frame = await self.audioReceiver.recv()
+            except Exception as e:
+                print("Audio Stream Ended due to exception", e)
                 return
             if frame is None:
                 print("Audio Stream Ended")
                 return
             if resampler:
-                frame = resampler.resample(frame)[0]
-            yield frame
+                frames = resampler.resample(frame)
+                for resampled_frame in frames:
+                    yield resampled_frame
+            else:
+                yield frame
 
     async def getNextVideoFrame(self):
         """
