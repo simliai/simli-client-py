@@ -1,6 +1,6 @@
 import asyncio
 from simli import SimliClient, SimliConfig
-from simli.renderers import NDArrayRenderer
+from simli.renderers import FileRenderer, NDArrayRenderer
 import os
 from dotenv import load_dotenv
 
@@ -23,18 +23,19 @@ async def main():
         SimliConfig(
             os.getenv("SIMLI_API_KEY", ""),  # API Key
             os.getenv("SIMLI_FACE_ID", ""),  # Face ID
-            maxSessionLength=20,
-            maxIdleTime=10,
         ),
     ) as connection:
         connection.registerSilentEventCallback(silentCallback)
         connection.registerSpeakEventCallback(speakCallback)
         await connection.send(audio)
         await connection.sendSilence()
-        videoOut, audioOut = await NDArrayRenderer(connection).render()
-        print(videoOut.shape, audioOut.shape)
+        renderTask = asyncio.create_task(NDArrayRenderer(connection).render())
+        await asyncio.sleep(10)
         print("Done")
         await connection.stop()
+        videoOut, audioOut = await renderTask
+        print(videoOut.shape, audioOut.shape)
+        await renderTask
 
 
 asyncio.run(main())

@@ -57,12 +57,21 @@ class VideoFrameReceiver(MediaStreamTrack):
 
     async def recv(self) -> VideoFrame:
         try:
-            frame: VideoFrame = await self.source.recv()
+            frame = None
+            while frame is None and self.source.readyState == "live":
+                try:
+                    frame: VideoFrame = await asyncio.wait_for(self.source.recv(), 0.5)
+                except asyncio.TimeoutError:
+                    continue
             return frame
         except Exception:
-            self.stop()
             self.source.stop()
+            self.stop()
             return None
+
+    def stop(self):
+        self.source.stop()
+        self.__ended = True
 
 
 class AudioFrameReceiver(MediaStreamTrack):
@@ -79,9 +88,14 @@ class AudioFrameReceiver(MediaStreamTrack):
 
             return frame
         except Exception:
-            self.stop()
+            self.__ended = True
             self.source.stop()
+            self.stop()
             return None
+
+    def stop(self):
+        self.__ended = True
+        self.source.stop()
 
 
 class SimliClient:
@@ -189,13 +203,13 @@ class SimliClient:
             )
             self.wsConnection = await self.wsConnection.__aenter__()
             await self.wsConnection.send(json.dumps(jsonOffer))
-            await self.wsConnection.recv()  # ACK
+            print(await self.wsConnection.recv())  # ACK
             answer = await self.wsConnection.recv()  # ANSWER
             answer = RTCSessionDescription(**json.loads(answer))
 
             await self.wsConnection.send(self.session_token)
             await self.pc.setRemoteDescription(answer)
-            await self.wsConnection.recv()  # ACK
+            print(await self.wsConnection.recv())  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
             if ready == "START":
                 self.ready.set()
@@ -371,9 +385,13 @@ class SimliClient:
                     first = False
             except Exception as e:
                 print("Video Stream Ended due to exception", e)
+                self.audioReceiver.stop()
+                self.videoReceiver.stop()
                 return
             if frame is None:
                 print("Video Stream Ended")
+                self.audioReceiver.stop()
+                self.videoReceiver.stop()
                 return
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
@@ -392,10 +410,14 @@ class SimliClient:
             try:
                 frame = await self.audioReceiver.recv()
             except Exception as e:
+                self.audioReceiver.stop()
+                self.videoReceiver.stop()
                 print("Audio Stream Ended due to exception", e)
                 return
             if frame is None:
                 print("Audio Stream Ended")
+                self.audioReceiver.stop()
+                self.videoReceiver.stop()
                 return
             if resampler:
                 frames = resampler.resample(frame)
