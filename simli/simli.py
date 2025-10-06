@@ -85,7 +85,6 @@ class AudioFrameReceiver(MediaStreamTrack):
     async def recv(self) -> AudioFrame:
         try:
             frame: AudioFrame = await self.source.recv()
-
             return frame
         except Exception:
             self.__ended = True
@@ -110,6 +109,9 @@ class SimliClient:
         useTrunServer: bool = False,
         latencyInterval: int = 60,
         simliURL: str = "https://api.simli.ai",
+        enable_logging: bool = True,
+        retry_count: int = 30,
+        retry_timeout: float = 15.0,
     ):
         """
         :param config: SimliConfig object containing the API Key and Face ID and other optional parameters for the Simli API refer to https://docs.simli.com for more information
@@ -117,6 +119,7 @@ class SimliClient:
         :param latencyInterval: Interval between pings to measure the latency between the client and the simli servers in seconds, set to 0 to disable
         :param simliURL: The URL of the Simli API, defaults to api.simli.ai. Don't change it unless you know what you are doing.
         """
+        self.enable_logging = enable_logging
         self.config = config
         self.pc: RTCPeerConnection = None
         self.iceConfig: list[RTCIceServer] = None
@@ -129,8 +132,10 @@ class SimliClient:
         self.latencyInterval = latencyInterval
         self.simliHTTPURL = simliURL
         self.simliWSURL = simliURL.replace("http", "ws")
-        self.tryCount = 3
+        self.tryCount = retry_count
+        self.retryTimeout = retry_timeout
         self.failErorr = None
+        self.starting = False
         self.speak_event: Optional[Awaitable] = None
         self.silent_event: Optional[Awaitable] = None
 
@@ -148,6 +153,9 @@ class SimliClient:
                 + self.failErorr.__repr__()
             )
         try:
+            if self.starting:
+                return
+            self.starting = True
             configJson = self.config.__dict__
             async with AsyncClient() as client:
                 requests = []
@@ -175,10 +183,14 @@ class SimliClient:
 
                 responses = await asyncio.gather(*requests)
                 session_token_response: Response = responses[0]
+                if not session_token_response.is_success:
+                    print(session_token_response.text)
                 session_token_response.raise_for_status()
                 self.session_token = session_token_response.json()["session_token"]
                 if self.useTrunServer:
                     self.iceJSON: Response = responses[1]
+                    if not self.iceJSON.is_success:
+                        print(self.iceJSON.text)
                     self.iceJSON.raise_for_status()
                     self.iceJSON = self.iceJSON.json()
                     self.iceConfig = []
@@ -203,28 +215,40 @@ class SimliClient:
             )
             self.wsConnection = await self.wsConnection.__aenter__()
             await self.wsConnection.send(json.dumps(jsonOffer))
-            print(await self.wsConnection.recv())  # ACK
+            message = await self.wsConnection.recv()
+            if self.enable_logging:
+                print(message)  # ACK
             answer = await self.wsConnection.recv()  # ANSWER
             answer = RTCSessionDescription(**json.loads(answer))
 
             await self.wsConnection.send(self.session_token)
             await self.pc.setRemoteDescription(answer)
-            print(await self.wsConnection.recv())  # ACK
+            message = await self.wsConnection.recv()
+            if self.enable_logging:
+                print(message)  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
-            if ready == "START":
-                self.ready.set()
-            self.receiverTask = asyncio.create_task(self.handleMessages())
+            while ready != "START":
+                if self.enable_logging:
+                    print(ready)
+                ready = await self.wsConnection.recv()  # START MESSAGE
+            self.ready.set()
             await self.sendSilence(1)
+            self.receiverTask = asyncio.create_task(self.handleMessages())
 
             if self.latencyInterval > 0:
                 self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
+            self.starting = False
         except Exception as e:
             self.failErorr = e
+            if self.enable_logging:
+                print(e)
             self.tryCount -= 1
+            await self.stop()
             await self.Initialize()
 
     def registerTrack(self, track: MediaStreamTrack):
-        print("Registering track", track.kind)
+        if self.enable_logging:
+            print("Registering track", track.kind)
         if track.kind == "audio":
             receiver = AudioFrameReceiver(track)
             self.audioReceiver = receiver
@@ -239,22 +263,30 @@ class SimliClient:
         while self.run:
             await self.ready.wait()
             message = await self.wsConnection.recv()
+            if message == "START":
+                self.run = True
+                self.ready.set()
+                await self.sendSilence(1)
+
             if message == "STOP":
                 self.run = False
-                print(
-                    "Closing session due to hitting the max session length or max idle time"
-                )
+                if self.enable_logging:
+                    print(
+                        "Closing session due to hitting the max session length or max idle time"
+                    )
                 await self.stop()
                 break
 
             elif "error" in message:
-                print("Error:", message)
+                if self.enable_logging:
+                    print("Error:", message)
                 await self.stop()
                 break
 
             elif "pong" in message:
                 pingTime = float(message.split(" ")[1])
-                print(f"Ping: {time.time() - pingTime}")
+                if self.enable_logging:
+                    print(f"Ping: {time.time() - pingTime}")
 
             elif message == "SILENT" and self.silent_event is not None:
                 await self.silent_event()
@@ -262,7 +294,7 @@ class SimliClient:
             elif message == "SPEAK" and self.speak_event is not None:
                 await self.speak_event()
 
-            elif message != "ACK":
+            elif message != "ACK" and self.enable_logging:
                 print(message)
 
     def registerSpeakEventCallback(self, async_callback: Awaitable):
@@ -303,8 +335,10 @@ class SimliClient:
         if self.stopping:
             return
         self.stopping = True
+        self.ready.clear()
         try:
             await self.wsConnection.send(b"DONE")
+            await self.wsConnection.close()
         except Exception:
             pass
         try:
@@ -328,12 +362,13 @@ class SimliClient:
             pass
 
         try:
-            print("Stopping Simli Connection")
-            await self.wsConnection.__aexit__(None, None, None)
+            if self.enable_logging:
+                print("Stopping Simli Connection")
             self.receiverTask.cancel()
             if self.pingTask:
                 self.pingTask.cancel()
-            print("Websocket closed")
+            if self.enable_logging:
+                print("Websocket closed")
             if self.pc.connectionState != "closed":
                 await self.pc.close()
         except Exception:
@@ -350,9 +385,10 @@ class SimliClient:
             for i in range(0, len(data), 6000):
                 await self.wsConnection.send(data[i : i + 6000])
         except websockets.WebSocketException:
-            print(
-                "Websocket closed, stopping, please check the logs for more information"
-            )
+            if self.enable_logging:
+                print(
+                    "Websocket closed, stopping, please check the logs for more information"
+                )
             await self.stop()
 
     async def sendSilence(self, duration: float = 0.1875):
@@ -379,17 +415,35 @@ class SimliClient:
         s = time.time()
         while True:
             try:
-                frame = await self.videoReceiver.recv()
+                frame = await asyncio.wait_for(
+                    self.videoReceiver.recv(), self.retryTimeout
+                )
                 if first:
-                    print(time.time() - s)
-                    first = False
+                    if frame is not None and frame.to_ndarray().sum() != 0:
+                        if self.enable_logging:
+                            print("FIRST VIDEO FRAME RECEIVED", time.time() - s)
+                        first = False
+            except asyncio.TimeoutError:
+                if first:
+                    await self.stop()
+                    await self.Initialize()
+                    continue
+                else:
+                    frame = None
             except Exception as e:
-                print("Video Stream Ended due to exception", e)
+                if self.enable_logging:
+                    print("Video Stream Ended due to exception", e)
                 self.audioReceiver.stop()
                 self.videoReceiver.stop()
+                self.stop()
                 return
+            if first:
+                await self.stop()
+                await self.Initialize()
+                continue
             if frame is None:
-                print("Video Stream Ended")
+                if self.enable_logging:
+                    print("Video Stream Ended")
                 self.audioReceiver.stop()
                 self.videoReceiver.stop()
                 return
@@ -406,19 +460,34 @@ class SimliClient:
             resampler = AudioResampler(
                 format="s16", layout="stereo", rate=targetSampleRate
             )
+        first = True
         while True:
             try:
-                frame = await self.audioReceiver.recv()
+                currentReceiver = self.audioReceiver
+                frame = await asyncio.wait_for(
+                    self.audioReceiver.recv(), self.retryTimeout
+                )
+                if frame is not None and first:
+                    first = False
+            except asyncio.TimeoutError:
+                continue
             except Exception as e:
                 self.audioReceiver.stop()
                 self.videoReceiver.stop()
-                print("Audio Stream Ended due to exception", e)
+                if self.enable_logging:
+                    print("Audio Stream Ended due to exception", e)
                 return
-            if frame is None:
-                print("Audio Stream Ended")
-                self.audioReceiver.stop()
-                self.videoReceiver.stop()
-                return
+            if first:
+                while self.audioReceiver is currentReceiver:
+                    await asyncio.sleep(0.001)
+                continue
+            if not self.starting:
+                if frame is None:
+                    if self.enable_logging:
+                        print("Audio Stream Ended")
+                    self.audioReceiver.stop()
+                    self.videoReceiver.stop()
+                    return
             if resampler:
                 frames = resampler.resample(frame)
                 for resampled_frame in frames:
