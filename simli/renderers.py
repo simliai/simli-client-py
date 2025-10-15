@@ -39,7 +39,7 @@ class NDArrayRenderer:
             if frame is None:
                 break
 
-            self.audioBuffer.append(frame.to_ndarray().reshape(2, -1))
+            self.audioBuffer.append(frame.to_ndarray())
 
 
 class FileRenderer:
