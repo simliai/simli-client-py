@@ -112,6 +112,7 @@ class SimliClient:
         enable_logging: bool = True,
         retry_count: int = 30,
         retry_timeout: float = 15.0,
+        enableSFU: bool = True,
     ):
         """
         :param config: SimliConfig object containing the API Key and Face ID and other optional parameters for the Simli API refer to https://docs.simli.com for more information
@@ -138,6 +139,7 @@ class SimliClient:
         self.starting = False
         self.speak_event: Optional[Awaitable] = None
         self.silent_event: Optional[Awaitable] = None
+        self.enableSFU = enableSFU
 
     async def Initialize(
         self,
@@ -210,7 +212,7 @@ class SimliClient:
             jsonOffer = self.pc.localDescription.__dict__
             self.wsConnection: websockets.asyncio.client.ClientConnection = (
                 websockets.asyncio.client.connect(
-                    f"{self.simliWSURL}/StartWebRTCSession"
+                    f"{self.simliWSURL}/StartWebRTCSession?enableSFU={self.enableSFU}"
                 )
             )
             self.wsConnection = await self.wsConnection.__aenter__()
