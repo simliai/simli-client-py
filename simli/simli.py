@@ -296,6 +296,9 @@ class SimliClient:
             elif message == "SPEAK" and self.speak_event is not None:
                 await self.speak_event()
 
+            elif message == "MISSING_SESSION_TOKEN":
+                await self.wsConnection.send(self.session_token)
+
             elif message != "ACK" and self.enable_logging:
                 print(message)
 
