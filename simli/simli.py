@@ -225,17 +225,14 @@ class SimliClient:
 
             await self.wsConnection.send(self.session_token)
             await self.pc.setRemoteDescription(answer)
-            message = await self.wsConnection.recv()
-            if self.enable_logging:
-                print(message)  # ACK
             ready = await self.wsConnection.recv()  # START MESSAGE
             while ready != "START":
                 if self.enable_logging:
                     print(ready)
                 ready = await self.wsConnection.recv()  # START MESSAGE
             self.ready.set()
-            await self.sendSilence(1)
             self.receiverTask = asyncio.create_task(self.handleMessages())
+            await self.sendSilence(1)
 
             if self.latencyInterval > 0:
                 self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
