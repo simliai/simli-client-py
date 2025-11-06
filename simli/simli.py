@@ -229,6 +229,8 @@ class SimliClient:
             while ready != "START":
                 if self.enable_logging:
                     print(ready)
+                if ready == "MISSING_SESSION_TOKEN":
+                    await self.wsConnection.send(self.session_token)
                 ready = await self.wsConnection.recv()  # START MESSAGE
             self.ready.set()
             self.receiverTask = asyncio.create_task(self.handleMessages())
