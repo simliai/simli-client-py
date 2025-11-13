@@ -83,7 +83,7 @@ class FileRenderer:
 
     async def encodeVideo(self):
         firstFrame = True
-        async for frame in self.client.getVideoStreamIterator("yuva420p"):
+        async for frame in self.client.getVideoStreamIterator("rgb24"):
             if firstFrame:
                 firstFrame = False
                 self.syncLock = True
@@ -116,8 +116,8 @@ class LocalRenderer:
 
     def __init__(self, client: SimliClient, windowName: str = "Simli"):
         try:
-            import cv2
-            import pyaudio
+            import cv2  # type: ignore
+            import pyaudio  # type: ignore
         except ImportError:
             raise ImportError(
                 "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli-ai[local]'\""
