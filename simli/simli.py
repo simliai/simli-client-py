@@ -542,7 +542,6 @@ class AudioFrameReceiver:
             frame.time_base = fractions.Fraction(1, 48000)
             frame.pts = self.sampleCount
             self.sampleCount += frame.samples
-            print(frame)
             return frame
         except StopAsyncIteration:
             return None
