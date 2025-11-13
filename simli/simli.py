@@ -526,6 +526,7 @@ class AudioFrameReceiver:
         super().__init__()
         self.source = source
         self.client = client
+        self.sampleCount = 0
 
     async def recv(self) -> AudioFrame:
         try:
@@ -538,7 +539,10 @@ class AudioFrameReceiver:
                 layout="stereo" if lkFrame.frame.num_channels == 2 else "mono",
             )
             frame.sample_rate = lkFrame.frame.sample_rate
-
+            frame.time_base = fractions.Fraction(1, 48000)
+            frame.pts = self.sampleCount
+            self.sampleCount += frame.samples
+            print(frame)
             return frame
         except StopAsyncIteration:
             return None
