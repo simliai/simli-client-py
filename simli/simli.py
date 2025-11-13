@@ -207,11 +207,13 @@ class SimliClient:
                 if self.enable_logging:
                     print(f"Ping: {time.time() - pingTime}")
 
-            elif message == "SILENT" and self.silent_event is not None:
-                await self.silent_event()
+            elif message == "SILENT":
+                if self.silent_event is not None:
+                    await self.silent_event()
 
-            elif message == "SPEAK" and self.speak_event is not None:
-                await self.speak_event()
+            elif message == "SPEAK":
+                if self.speak_event is not None:
+                    await self.speak_event()
 
             elif message == "MISSING_SESSION_TOKEN":
                 await self.wsConnection.send(self.session_token)
@@ -234,9 +236,6 @@ class SimliClient:
                         if self.enable_logging:
                             print(parsedMessage.keys())
                 except Exception:
-                    import traceback
-
-                    traceback.print_exc()
                     print("FAILED TO DECODE MESSAGE", message)
 
     def registerSpeakEventCallback(self, async_callback: Awaitable):
