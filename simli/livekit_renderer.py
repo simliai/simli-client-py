@@ -1,7 +1,10 @@
 import asyncio
+import logging
 from av.audio.frame import AudioFrame
 from av.video.frame import VideoFrame
 from . import SimliClient
+
+logger = logging.getLogger(__name__)
 
 try:
     from livekit import rtc
@@ -72,7 +75,7 @@ class LivekitRenderer:
         await self.room.local_participant.publish_track(
             self.audioTrack, self.MicrophoneOptions
         )
-        print("Published Tracks")
+        logger.info("Published Tracks")
 
     async def render(self):
         self.videoQueue: asyncio.Queue[VideoFrame] = asyncio.Queue()
@@ -85,7 +88,7 @@ class LivekitRenderer:
     async def PopulateVideoQueue(self):
         async for frame in self.client.getVideoStreamIterator("yuva420p"):
             if frame is None:
-                print("Video Queue Empty")
+                logger.info("Video Queue Empty")
                 break
             frameLivekit = rtc.VideoFrame(
                 frame.width,
