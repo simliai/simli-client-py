@@ -1,8 +1,11 @@
 import asyncio
 import time
 import threading
+import logging
 
 from . import SimliClient
+
+logger = logging.getLogger(__name__)
 
 try:
     from daily import *  # noqa: F403
@@ -85,7 +88,7 @@ class DailyRenderer:
 
     def on_join(self, data, error):
         self.running = True
-        print("Started")
+        logger.info("Started")
 
     async def render(self):
         while not self.running:

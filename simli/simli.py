@@ -3,6 +3,7 @@ import fractions
 import time
 import asyncio
 import json
+import logging
 from dataclasses import dataclass
 from typing import Awaitable, Optional
 
@@ -13,6 +14,8 @@ from av.audio.resampler import AudioResampler
 from livekit import rtc
 import numpy as np
 import websockets.asyncio.client
+
+logger = logging.getLogger(__name__)
 
 
 class SimliModels(str, Enum):
@@ -121,7 +124,7 @@ class SimliClient:
                         f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
                     )
                     if not session_token_response.is_success:
-                        print(session_token_response.text)
+                        logger.error(session_token_response.text)
                     session_token_response.raise_for_status()
                     self.session_token = session_token_response.json()["session_token"]
 
@@ -150,7 +153,7 @@ class SimliClient:
         except Exception as e:
             self.failErorr = e
             if self.enable_logging:
-                print(e)
+                logger.error(e)
             self.tryCount -= 1
             await self.stop()
             await self.Initialize()
@@ -164,7 +167,7 @@ class SimliClient:
         while self.fps is None:
             time.sleep(0.0001)
         if self.enable_logging:
-            print("Registering track", track.kind)
+            logger.info("Registering track %s", track.kind)
         if track.kind == rtc.TrackKind.KIND_AUDIO:
             receiver = AudioFrameReceiver(
                 rtc.AudioStream(track, sample_rate=48000, num_channels=2, client=self),
@@ -190,7 +193,7 @@ class SimliClient:
             elif message == "STOP":
                 self.run = False
                 if self.enable_logging:
-                    print(
+                    logger.warning(
                         "Closing session due to message from server, check logs for more info"
                     )
                 await self.stop()
@@ -198,14 +201,14 @@ class SimliClient:
 
             elif "error" in message:
                 if self.enable_logging:
-                    print("Error:", message)
+                    logger.error("Error: %s", message)
                 await self.stop()
                 break
 
             elif "pong" in message:
                 pingTime = float(message.split(" ")[1])
                 if self.enable_logging:
-                    print(f"Ping: {time.time() - pingTime}")
+                    logger.debug("Ping: %s", time.time() - pingTime)
 
             elif message == "SILENT":
                 if self.silent_event is not None:
@@ -234,9 +237,9 @@ class SimliClient:
 
                     else:
                         if self.enable_logging:
-                            print(parsedMessage.keys())
+                            logger.debug("Received message with keys: %s", parsedMessage.keys())
                 except Exception:
-                    print("FAILED TO DECODE MESSAGE", message)
+                    logger.error("FAILED TO DECODE MESSAGE: %s", message)
 
     def registerSpeakEventCallback(self, async_callback: Awaitable):
         """
@@ -308,12 +311,12 @@ class SimliClient:
         try:
             await self.pc.disconnect()
             if self.enable_logging:
-                print("Stopping Simli Connection")
+                logger.info("Stopping Simli Connection")
             self.receiverTask.cancel()
             if self.pingTask:
                 self.pingTask.cancel()
             if self.enable_logging:
-                print("Websocket closed")
+                logger.info("Websocket closed")
         except Exception:
             pass
 
@@ -329,7 +332,7 @@ class SimliClient:
                 await self.wsConnection.send(data[i : i + 6000])
         except websockets.WebSocketException:
             if self.enable_logging:
-                print(
+                logger.warning(
                     "Websocket closed, stopping, please check the logs for more information"
                 )
             await self.stop()
@@ -347,7 +350,7 @@ class SimliClient:
 
         except websockets.WebSocketException:
             if self.enable_logging:
-                print(
+                logger.warning(
                     "Websocket closed, stopping, please check the logs for more information"
                 )
             await self.stop()
@@ -383,13 +386,13 @@ class SimliClient:
                 if first:
                     if frame is not None and frame.to_ndarray().sum() != 0:
                         if self.enable_logging:
-                            print(
-                                "FIRST VIDEO FRAME RECEIVED",
+                            logger.info(
+                                "FIRST VIDEO FRAME RECEIVED: %s",
                                 time.time() - self.startTime,
                             )
                         first = False
             except asyncio.TimeoutError:
-                print("video timeout")
+                logger.warning("video timeout")
                 if first and not self.stopping:
                     await self.stop()
                     await self.Initialize()
@@ -398,7 +401,7 @@ class SimliClient:
                     frame = None
             except Exception as e:
                 if self.enable_logging:
-                    print("Video Stream Ended due to exception", e)
+                    logger.error("Video Stream Ended due to exception: %s", e)
                 await self.stop()
                 return
             if frame is None and not self.stopping:
@@ -407,7 +410,7 @@ class SimliClient:
                 continue
             if frame is None:
                 if self.enable_logging:
-                    print("Video Stream Ended")
+                    logger.info("Video Stream Ended")
                 return
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
@@ -437,7 +440,7 @@ class SimliClient:
                 continue
             except Exception as e:
                 if self.enable_logging:
-                    print("Audio Stream Ended due to exception", e)
+                    logger.error("Audio Stream Ended due to exception: %s", e)
                 return
             if first:
                 while self.audioReceiver is currentReceiver:
@@ -446,7 +449,7 @@ class SimliClient:
             if not self.starting:
                 if frame is None:
                     if self.enable_logging:
-                        print("Audio Stream Ended")
+                        logger.info("Audio Stream Ended")
 
                     return
             if resampler:
