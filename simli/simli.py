@@ -1,9 +1,13 @@
+import urllib.parse as urlparse
+from urllib.parse import urlencode
+
+
 from enum import Enum
 import time
 import asyncio
 import json
 from dataclasses import dataclass
-from typing import Awaitable, Optional
+from typing import Awaitable, Optional, Callable, Self
 
 
 from httpx import AsyncClient, Response
@@ -12,6 +16,8 @@ from aiortc import (
     RTCSessionDescription,
     RTCIceServer,
     RTCConfiguration,
+    AudioStreamTrack,
+    VideoStreamTrack,
 )
 from aiortc.mediastreams import MediaStreamTrack
 from aiortc.rtcrtpreceiver import RemoteStreamTrack
@@ -48,14 +54,14 @@ class SimliConfig:
     model: SimliModels = SimliModels.fasttalk
 
 
-class VideoFrameReceiver(MediaStreamTrack):
+class VideoFrameReceiver:
     kind = "video"
 
     def __init__(self, source: RemoteStreamTrack):
         self.source = source
         self.__ended = False
 
-    async def recv(self) -> VideoFrame:
+    async def recv(self) -> VideoFrame | None:
         try:
             frame = None
             while frame is None and self.source.readyState == "live":
@@ -63,7 +69,10 @@ class VideoFrameReceiver(MediaStreamTrack):
                     frame: VideoFrame = await asyncio.wait_for(self.source.recv(), 0.5)
                 except asyncio.TimeoutError:
                     continue
-            return frame
+            if isinstance(frame, VideoFrame):
+                return frame
+            else:
+                return None
         except Exception:
             self.source.stop()
             self.stop()
@@ -74,7 +83,7 @@ class VideoFrameReceiver(MediaStreamTrack):
         self.__ended = True
 
 
-class AudioFrameReceiver(MediaStreamTrack):
+class AudioFrameReceiver:
     kind = "audio"
 
     def __init__(self, source: RemoteStreamTrack):
@@ -82,10 +91,13 @@ class AudioFrameReceiver(MediaStreamTrack):
         self.source = source
         self.__ended = False
 
-    async def recv(self) -> AudioFrame:
+    async def recv(self) -> AudioFrame | None:
         try:
-            frame: AudioFrame = await self.source.recv()
-            return frame
+            frame = await self.source.recv()
+            if isinstance(frame, AudioFrame):
+                return frame
+            else:
+                return None
         except Exception:
             self.__ended = True
             self.source.stop()
@@ -124,7 +136,7 @@ class SimliClient:
         self.config = config
         self.pc: RTCPeerConnection = None
         self.iceConfig: list[RTCIceServer] = None
-        self.ready = asyncio.Event()
+        self.ready: asyncio.Event = asyncio.Event()
         self.run = True
         self.receiverTask: asyncio.Task = None
         self.pingTask: asyncio.Task = None
@@ -135,10 +147,10 @@ class SimliClient:
         self.simliWSURL = simliURL.replace("http", "ws")
         self.tryCount = retry_count
         self.retryTimeout = retry_timeout
-        self.failErorr = None
+        self.failError = None
         self.starting = False
-        self.speak_event: Optional[Awaitable] = None
-        self.silent_event: Optional[Awaitable] = None
+        self.speak_event: Optional[Callable[[], Awaitable[None]]] = None
+        self.silent_event: Optional[Callable[[], Awaitable[None]]] = None
         self.enableSFU = enableSFU
 
     async def Initialize(
@@ -152,7 +164,7 @@ class SimliClient:
         if self.tryCount == 0:
             raise Exception(
                 "Failed to connect to the Simli servers. Last known fail reason: "
-                + self.failErorr.__repr__()
+                + str(self.failError)
             )
         try:
             if self.starting:
@@ -162,14 +174,12 @@ class SimliClient:
             async with AsyncClient() as client:
                 requests = []
                 requests.append(
-                    client.post(
-                        f"{self.simliHTTPURL}/startAudioToVideoSession", json=configJson
-                    )
+                    client.post(f"{self.simliHTTPURL}/compose/token", json=configJson)
                 )
                 if self.useTrunServer:
                     requests.append(
                         client.post(
-                            f"{self.simliHTTPURL}/getIceServers",
+                            f"{self.simliHTTPURL}/compose/ice",
                             json={"apiKey": self.config.apiKey},
                         )
                     )
@@ -177,9 +187,7 @@ class SimliClient:
                 else:
                     self.iceConfig = [
                         RTCIceServer(
-                            urls=[
-                                "stun:stun.l.google.com:19302",
-                            ]
+                            urls="stun:stun.l.google.com:19302",
                         )
                     ]
 
@@ -203,17 +211,21 @@ class SimliClient:
             self.pc.addTransceiver("audio", direction="recvonly")
             self.pc.addTransceiver("video", direction="recvonly")
             self.pc.on("track", self.registerTrack)
-            self.dc = self.pc.createDataChannel("datachannel", ordered=True)
 
             await self.pc.setLocalDescription(await self.pc.createOffer())
             while self.pc.iceGatheringState != "complete":
                 await asyncio.sleep(0.001)
 
             jsonOffer = self.pc.localDescription.__dict__
-            self.wsConnection: websockets.asyncio.client.ClientConnection = (
-                websockets.asyncio.client.connect(
-                    f"{self.simliWSURL}/StartWebRTCSession?enableSFU={self.enableSFU}"
-                )
+            url_parts = list(urlparse.urlparse(f"{self.simliWSURL}/compose/webrtc/p2p"))
+            query = dict(urlparse.parse_qsl(url_parts[4]))
+            query.update(
+                {"enableSFU": str(self.enableSFU), "session_token": self.session_token}
+            )
+            url_parts[4] = urlencode(query)
+
+            self.wsConnection: websockets.asyncio.client.Connection = (
+                websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
             )
             self.wsConnection = await self.wsConnection.__aenter__()
             await self.wsConnection.send(json.dumps(jsonOffer))
@@ -240,14 +252,16 @@ class SimliClient:
                 self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
             self.starting = False
         except Exception as e:
-            self.failErorr = e
+            self.failError = e
             if self.enable_logging:
                 print(e)
             self.tryCount -= 1
             await self.stop()
+            if self.tryCount <= 0:
+                raise Exception(f"Failed To Initialize SimliClient {e}")
             await self.Initialize()
 
-    def registerTrack(self, track: MediaStreamTrack):
+    def registerTrack(self, track: RemoteStreamTrack):
         if self.enable_logging:
             print("Registering track", track.kind)
         if track.kind == "audio":
@@ -264,44 +278,45 @@ class SimliClient:
         while self.run:
             await self.ready.wait()
             message = await self.wsConnection.recv()
-            if message == "START":
-                self.run = True
-                self.ready.set()
-                await self.sendSilence(1)
+            if isinstance(message, str):
+                if message == "START":
+                    self.run = True
+                    self.ready.set()
+                    await self.sendSilence(1)
 
-            if message == "STOP":
-                self.run = False
-                if self.enable_logging:
-                    print(
-                        "Closing session due to hitting the max session length or max idle time"
-                    )
-                await self.stop()
-                break
+                if message == "STOP":
+                    self.run = False
+                    if self.enable_logging:
+                        print(
+                            "Closing session due to hitting the max session length or max idle time"
+                        )
+                    await self.stop()
+                    break
 
-            elif "error" in message:
-                if self.enable_logging:
-                    print("Error:", message)
-                await self.stop()
-                break
+                elif "error" in message:
+                    if self.enable_logging:
+                        print("Error:", message)
+                    await self.stop()
+                    break
 
-            elif "pong" in message:
-                pingTime = float(message.split(" ")[1])
-                if self.enable_logging:
-                    print(f"Ping: {time.time() - pingTime}")
+                elif "pong" in message:
+                    pingTime = float(message.split(" ")[1])
+                    if self.enable_logging:
+                        print(f"Ping: {time.time() - pingTime}")
 
-            elif message == "SILENT" and self.silent_event is not None:
-                await self.silent_event()
+                elif message == "SILENT" and self.silent_event is not None:
+                    await self.silent_event()
 
-            elif message == "SPEAK" and self.speak_event is not None:
-                await self.speak_event()
+                elif message == "SPEAK" and self.speak_event is not None:
+                    await self.speak_event()
 
-            elif message == "MISSING_SESSION_TOKEN":
-                await self.wsConnection.send(self.session_token)
+                elif message == "MISSING_SESSION_TOKEN":
+                    await self.wsConnection.send(self.session_token)
 
-            elif message != "ACK" and self.enable_logging:
-                print(message)
+                elif message != "ACK" and self.enable_logging:
+                    print(message)
 
-    def registerSpeakEventCallback(self, async_callback: Awaitable):
+    def registerSpeakEventCallback(self, async_callback: Callable[[], Awaitable[None]]):
         """
         Example:
         ```
@@ -312,7 +327,9 @@ class SimliClient:
         """
         self.speak_event = async_callback
 
-    def registerSilentEventCallback(self, async_callback: Awaitable):
+    def registerSilentEventCallback(
+        self, async_callback: Callable[[], Awaitable[None]]
+    ):
         """
         Example:
         ```
@@ -347,7 +364,8 @@ class SimliClient:
             pass
         try:
             while (
-                self.audioReceiver.readyState != "ended"
+                isinstance(self.audioReceiver, AudioStreamTrack)
+                and self.audioReceiver.readyState != "ended"
                 and await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03)
                 and drain
             ):
@@ -357,7 +375,8 @@ class SimliClient:
             pass
         try:
             while (
-                self.videoReceiver.readyState != "ended"
+                isinstance(self.videoReceiver, VideoStreamTrack)
+                and self.videoReceiver.readyState != "ended"
                 and await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03)
                 and drain
             ):
@@ -388,6 +407,24 @@ class SimliClient:
         try:
             for i in range(0, len(data), 6000):
                 await self.wsConnection.send(data[i : i + 6000])
+        except websockets.WebSocketException:
+            if self.enable_logging:
+                print(
+                    "Websocket closed, stopping, please check the logs for more information"
+                )
+            await self.stop()
+
+    async def sendImmediate(self, data: bytes):
+        if not self.ready.is_set():
+            raise Exception("WSDC Not ready, please wait until self.ready is True")
+
+        try:
+            await self.wsConnection.send(b"PLAY_IMMEDIATE" + data[:128000])
+            size = len(data)
+            if size > 128000:
+                for i in range(128000, size, 6000):
+                    await self.wsConnection.send(data[i : i + 6000])
+
         except websockets.WebSocketException:
             if self.enable_logging:
                 print(
@@ -511,7 +548,7 @@ class SimliClient:
         """
         return await self.audioReceiver.recv()
 
-    async def __aenter__(self):
+    async def __aenter__(self) -> Self:
         await self.Initialize()
         return self
 
