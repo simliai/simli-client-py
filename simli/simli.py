@@ -47,7 +47,6 @@ class SimliConfig:
 
     apiKey: str
     faceId: str
-    syncAudio: bool = True
     handleSilence: bool = True
     maxSessionLength: int = 600
     maxIdleTime: int = 30
@@ -170,17 +169,22 @@ class SimliClient:
             if self.starting:
                 return
             self.starting = True
-            configJson = self.config.__dict__
+            configJson = self.config.__dict__.copy()
+            del configJson["apiKey"]
             async with AsyncClient() as client:
                 requests = []
                 requests.append(
-                    client.post(f"{self.simliHTTPURL}/compose/token", json=configJson)
+                    client.post(
+                        f"{self.simliHTTPURL}/compose/token",
+                        json=configJson,
+                        headers={"x-simli-api-key": self.config.apiKey},
+                    )
                 )
                 if self.useTrunServer:
                     requests.append(
-                        client.post(
+                        client.get(
                             f"{self.simliHTTPURL}/compose/ice",
-                            json={"apiKey": self.config.apiKey},
+                            headers={"x-simli-api-key": self.config.apiKey},
                         )
                     )
 
