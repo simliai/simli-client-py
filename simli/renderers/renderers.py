@@ -6,7 +6,7 @@ import av.container
 import av.packet
 import av.video
 
-from .simli import SimliClient
+from ..simli import SimliClient
 
 
 class NDArrayRenderer:
@@ -71,10 +71,10 @@ class FileRenderer:
         """
         self.container = av.open(self.filename, "w", format=self.outputFormat)
 
-        self.videoStream = self.container.add_stream(self.videoCodec, rate=30)
+        self.videoStream: av.VideoStream = self.container.add_stream(self.videoCodec, rate=30)
         self.videoStream.pix_fmt = "yuv420p"
 
-        self.audioStream = self.container.add_stream(self.audioCodec)
+        self.audioStream: av.AudioStream = self.container.add_stream(self.audioCodec)
         videoEncodeTask = asyncio.create_task(self.encodeVideo())
         audioEncodeTask = asyncio.create_task(self.encodeAudio())
         await asyncio.gather(videoEncodeTask, audioEncodeTask)
@@ -116,17 +116,15 @@ class LocalRenderer:
 
     def __init__(self, client: SimliClient, windowName: str = "Simli"):
         try:
-            import cv2
-            import pyaudio
+            import cv2  # ty:ignore[unresolved-import]
+            import pyaudio  # ty:ignore[unresolved-import]
         except ImportError:
             raise ImportError(
                 "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli-ai[local]'\""
             )
 
         self.client = client
-        self.videoOutput = cv2.namedWindow(
-            windowName, cv2.WINDOW_NORMAL | cv2.WINDOW_AUTOSIZE
-        )
+        self.videoOutput = cv2.namedWindow(windowName, cv2.WINDOW_NORMAL | cv2.WINDOW_AUTOSIZE)
         cv2.resizeWindow(windowName, (512, 512))
         self.videoBuffer = []
 
@@ -159,9 +157,7 @@ class LocalRenderer:
                 self.cv2.destroyAllWindows()
                 break
             self.videoBuffer.append(frame.to_ndarray())
-            self.cv2.imshow(
-                "Simli", self.cv2.cvtColor(self.videoBuffer[0], self.cv2.COLOR_RGB2BGR)
-            )
+            self.cv2.imshow("Simli", self.cv2.cvtColor(self.videoBuffer[0], self.cv2.COLOR_RGB2BGR))
             self.videoBuffer.pop(0)
             self.cv2.waitKey(1)
 

@@ -1,17 +1,18 @@
 import asyncio
-import time
 import threading
+import time
+from typing import Optional
 
-from . import SimliClient
+from .. import SimliClient
 
 try:
-    from daily import *  # noqa: F403
+    from daily import CallClient, Daily
 except ImportError:
     raise ImportError(
         "daily is required for DailyRenderer, Install optional dependencies using \n\"pip install 'simli-ai[daily]'\""
     )
 
-Daily.init()  # noqa: F405
+Daily.init()
 
 
 class DailyRenderer:
@@ -20,10 +21,10 @@ class DailyRenderer:
         client: SimliClient,
         meeting_url: str,
         dailyClient: CallClient,  # noqa: F405
-        meeting_token: str = None,
+        meeting_token: Optional[str] = None,
         videoWidth=512,
         videoHeight=512,
-        client_settings: dict = None,
+        client_settings: Optional[dict] = None,
     ):
         """
         If supplying your own client_settings, make sure to include

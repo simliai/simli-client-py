@@ -1,34 +1,28 @@
-import urllib.parse as urlparse
-from urllib.parse import urlencode
-
-
-from enum import Enum
-import time
 import asyncio
-import json
+import traceback
 from dataclasses import dataclass
-from typing import Awaitable, Optional, Callable, Self
+from enum import Enum
+from typing import AsyncGenerator, Awaitable, Callable, Optional, Self
 
-
-from httpx import AsyncClient, Response
-from aiortc import (
-    RTCPeerConnection,
-    RTCSessionDescription,
-    RTCIceServer,
-    RTCConfiguration,
-    AudioStreamTrack,
-    VideoStreamTrack,
-)
-from aiortc.mediastreams import MediaStreamTrack
-from aiortc.rtcrtpreceiver import RemoteStreamTrack
-from av import VideoFrame, AudioFrame
-from av.audio.resampler import AudioResampler
 import websockets.asyncio.client
+from av import VideoFrame
+from av.audio.resampler import AudioResampler
+
+from .critical_exceptions import SimliExceptions
+from .events import SimliEvent
+from .logger import logger
+from .transports import base_transport, livekit_transport, p2p_transport
+from .transports.base_transport import Run
 
 
 class SimliModels(str, Enum):
     fasttalk = "fasttalk"
     artalk = "artalk"
+
+
+class TransportMode(Enum):
+    P2P = 1
+    LIVEKIT = 2
 
 
 @dataclass
@@ -45,67 +39,11 @@ class SimliConfig:
             Maximum duration the avatar is not speaking for before the avatar disconnects.
     """
 
-    apiKey: str
     faceId: str
     handleSilence: bool = True
     maxSessionLength: int = 600
     maxIdleTime: int = 30
     model: SimliModels = SimliModels.fasttalk
-
-
-class VideoFrameReceiver:
-    kind = "video"
-
-    def __init__(self, source: RemoteStreamTrack):
-        self.source = source
-        self.__ended = False
-
-    async def recv(self) -> VideoFrame | None:
-        try:
-            frame = None
-            while frame is None and self.source.readyState == "live":
-                try:
-                    frame: VideoFrame = await asyncio.wait_for(self.source.recv(), 0.5)
-                except asyncio.TimeoutError:
-                    continue
-            if isinstance(frame, VideoFrame):
-                return frame
-            else:
-                return None
-        except Exception:
-            self.source.stop()
-            self.stop()
-            return None
-
-    def stop(self):
-        self.source.stop()
-        self.__ended = True
-
-
-class AudioFrameReceiver:
-    kind = "audio"
-
-    def __init__(self, source: RemoteStreamTrack):
-        super().__init__()
-        self.source = source
-        self.__ended = False
-
-    async def recv(self) -> AudioFrame | None:
-        try:
-            frame = await self.source.recv()
-            if isinstance(frame, AudioFrame):
-                return frame
-            else:
-                return None
-        except Exception:
-            self.__ended = True
-            self.source.stop()
-            self.stop()
-            return None
-
-    def stop(self):
-        self.__ended = True
-        self.source.stop()
 
 
 class SimliClient:
@@ -114,33 +52,33 @@ class SimliClient:
     For more information on the Simli API, visit https://docs.simli.com/
     """
 
+    Connection: base_transport.BaseTransport | None
+
     def __init__(
         self,
+        api_key: str,
         config: SimliConfig,
-        useTrunServer: bool = False,
         latencyInterval: int = 60,
         simliURL: str = "https://api.simli.ai",
         enable_logging: bool = True,
-        retry_count: int = 30,
+        retry_count: int = 3,
         retry_timeout: float = 15.0,
         enableSFU: bool = True,
+        transport_mode: TransportMode = TransportMode.P2P,
     ):
         """
         :param config: SimliConfig object containing the API Key and Face ID and other optional parameters for the Simli API refer to https://docs.simli.com for more information
-        :param useTrunServer: Whether to use the TURN server provided by the Simli API, if set to False, the default STUN server will be used, use only if you are having issues with the default STUN server
         :param latencyInterval: Interval between pings to measure the latency between the client and the simli servers in seconds, set to 0 to disable
         :param simliURL: The URL of the Simli API, defaults to api.simli.ai. Don't change it unless you know what you are doing.
         """
         self.enable_logging = enable_logging
-        self.config = config
-        self.pc: RTCPeerConnection = None
-        self.iceConfig: list[RTCIceServer] = None
+        self.config: SimliConfig = config
+        self.api_key = api_key
         self.ready: asyncio.Event = asyncio.Event()
-        self.run = True
+        self.run = Run()
         self.receiverTask: asyncio.Task = None
         self.pingTask: asyncio.Task = None
         self.stopping = False
-        self.useTrunServer: bool = useTrunServer
         self.latencyInterval = latencyInterval
         self.simliHTTPURL = simliURL
         self.simliWSURL = simliURL.replace("http", "ws")
@@ -151,10 +89,13 @@ class SimliClient:
         self.speak_event: Optional[Callable[[], Awaitable[None]]] = None
         self.silent_event: Optional[Callable[[], Awaitable[None]]] = None
         self.enableSFU = enableSFU
+        self.cached_session_token: str = ""
+        self.transport_mode = transport_mode
+        self.Connection = None
 
     async def Initialize(
         self,
-    ):
+    ) -> Self:
         """
         Start Simli Connection
 
@@ -167,160 +108,53 @@ class SimliClient:
             )
         try:
             if self.starting:
-                return
+                return self
             self.starting = True
-            configJson = self.config.__dict__.copy()
-            del configJson["apiKey"]
-            async with AsyncClient() as client:
-                requests = []
-                requests.append(
-                    client.post(
-                        f"{self.simliHTTPURL}/compose/token",
-                        json=configJson,
-                        headers={"x-simli-api-key": self.config.apiKey},
+
+            match self.transport_mode:
+                case TransportMode.P2P:
+                    self.Connection = p2p_transport.P2PTransport(
+                        self.run,
+                        self.api_key,
+                        self.config.__dict__,
+                        self.simliWSURL,
+                        self.simliHTTPURL,
+                        self.enableSFU,
                     )
-                )
-                if self.useTrunServer:
-                    requests.append(
-                        client.get(
-                            f"{self.simliHTTPURL}/compose/ice",
-                            headers={"x-simli-api-key": self.config.apiKey},
-                        )
+                    await self.Connection.Connect()
+                case TransportMode.LIVEKIT:
+                    self.Connection = livekit_transport.LivekitTransport(
+                        self.run,
+                        self.api_key,
+                        self.config.__dict__,
+                        self.simliWSURL,
+                        self.simliHTTPURL,
+                        self.enableSFU,
                     )
+                    await self.Connection.Connect()
+                case _:
+                    raise ValueError("INVALID TRANSPORT MODE")
 
-                else:
-                    self.iceConfig = [
-                        RTCIceServer(
-                            urls="stun:stun.l.google.com:19302",
-                        )
-                    ]
-
-                responses = await asyncio.gather(*requests)
-                session_token_response: Response = responses[0]
-                if not session_token_response.is_success:
-                    print(session_token_response.text)
-                session_token_response.raise_for_status()
-                self.session_token = session_token_response.json()["session_token"]
-                if self.useTrunServer:
-                    self.iceJSON: Response = responses[1]
-                    if not self.iceJSON.is_success:
-                        print(self.iceJSON.text)
-                    self.iceJSON.raise_for_status()
-                    self.iceJSON = self.iceJSON.json()
-                    self.iceConfig = []
-                    for server in self.iceJSON:
-                        self.iceConfig.append(RTCIceServer(**server))
-
-            self.pc = RTCPeerConnection(RTCConfiguration(iceServers=self.iceConfig))
-            self.pc.addTransceiver("audio", direction="recvonly")
-            self.pc.addTransceiver("video", direction="recvonly")
-            self.pc.on("track", self.registerTrack)
-
-            await self.pc.setLocalDescription(await self.pc.createOffer())
-            while self.pc.iceGatheringState != "complete":
-                await asyncio.sleep(0.001)
-
-            jsonOffer = self.pc.localDescription.__dict__
-            url_parts = list(urlparse.urlparse(f"{self.simliWSURL}/compose/webrtc/p2p"))
-            query = dict(urlparse.parse_qsl(url_parts[4]))
-            query.update(
-                {"enableSFU": str(self.enableSFU), "session_token": self.session_token}
-            )
-            url_parts[4] = urlencode(query)
-
-            self.wsConnection: websockets.asyncio.client.Connection = (
-                websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
-            )
-            self.wsConnection = await self.wsConnection.__aenter__()
-            await self.wsConnection.send(json.dumps(jsonOffer))
-            message = await self.wsConnection.recv()
-            if self.enable_logging:
-                print(message)  # ACK
-            answer = await self.wsConnection.recv()  # ANSWER
-            answer = RTCSessionDescription(**json.loads(answer))
-
-            await self.wsConnection.send(self.session_token)
-            await self.pc.setRemoteDescription(answer)
-            ready = await self.wsConnection.recv()  # START MESSAGE
-            while ready != "START":
-                if self.enable_logging:
-                    print(ready)
-                if ready == "MISSING_SESSION_TOKEN":
-                    await self.wsConnection.send(self.session_token)
-                ready = await self.wsConnection.recv()  # START MESSAGE
-            self.ready.set()
-            self.receiverTask = asyncio.create_task(self.handleMessages())
-            await self.sendSilence(1)
-
-            if self.latencyInterval > 0:
-                self.pingTask = asyncio.create_task(self.ping(self.latencyInterval))
-            self.starting = False
         except Exception as e:
-            self.failError = e
-            if self.enable_logging:
-                print(e)
+            if len(e.args) > 0 and SimliExceptions(e.args[0]) != SimliExceptions.UNKNOWN_ERROR:
+                self.tryCount = 0
+
             self.tryCount -= 1
             await self.stop()
             if self.tryCount <= 0:
-                raise Exception(f"Failed To Initialize SimliClient {e}")
-            await self.Initialize()
+                raise Exception("Failed To Initialize SimliClient")
+            logger.info("Retrying Connection")
+            self.transport_mode = TransportMode.LIVEKIT
+            traceback.print_exc()
+            return await self.Initialize()
+        self.starting = False
+        return self
 
-    def registerTrack(self, track: RemoteStreamTrack):
-        if self.enable_logging:
-            print("Registering track", track.kind)
-        if track.kind == "audio":
-            receiver = AudioFrameReceiver(track)
-            self.audioReceiver = receiver
-        elif track.kind == "video":
-            receiver = VideoFrameReceiver(track)
-            self.videoReceiver = receiver
-
-    async def handleMessages(self):
-        """
-        Internal: Handles messages from the websocket connection. Called in the Initialize function
-        """
-        while self.run:
-            await self.ready.wait()
-            message = await self.wsConnection.recv()
-            if isinstance(message, str):
-                if message == "START":
-                    self.run = True
-                    self.ready.set()
-                    await self.sendSilence(1)
-
-                if message == "STOP":
-                    self.run = False
-                    if self.enable_logging:
-                        print(
-                            "Closing session due to hitting the max session length or max idle time"
-                        )
-                    await self.stop()
-                    break
-
-                elif "error" in message:
-                    if self.enable_logging:
-                        print("Error:", message)
-                    await self.stop()
-                    break
-
-                elif "pong" in message:
-                    pingTime = float(message.split(" ")[1])
-                    if self.enable_logging:
-                        print(f"Ping: {time.time() - pingTime}")
-
-                elif message == "SILENT" and self.silent_event is not None:
-                    await self.silent_event()
-
-                elif message == "SPEAK" and self.speak_event is not None:
-                    await self.speak_event()
-
-                elif message == "MISSING_SESSION_TOKEN":
-                    await self.wsConnection.send(self.session_token)
-
-                elif message != "ACK" and self.enable_logging:
-                    print(message)
-
-    def registerSpeakEventCallback(self, async_callback: Callable[[], Awaitable[None]]):
+    def registerEventCallback(
+        self,
+        event: SimliEvent,
+        async_callback: Callable[[], Awaitable[None]],
+    ):
         """
         Example:
         ```
@@ -329,109 +163,51 @@ class SimliClient:
         simliClient.registerSpeakEventCallback(callback)
         ```
         """
-        self.speak_event = async_callback
 
-    def registerSilentEventCallback(
-        self, async_callback: Callable[[], Awaitable[None]]
-    ):
-        """
-        Example:
-        ```
-        async def callback():
-            print("SILENT")
-        simliClient.registerSpeakEventCallback(callback)
-        ```
-        """
-        self.silent_event = async_callback
+        async def callback_wrapper(_):
+            await async_callback()
 
-    async def ping(self, interval: int):
-        """
-        Internal: Pings the simli servers to measure the latency between the client and the simli servers. Called in the Initialize function
-        """
-        while self.run:
-            pingTime = time.time()
-            await self.send(f"ping {pingTime}")
-            await asyncio.sleep(interval)
+        if not self.Connection:
+            raise RuntimeError("Invalid State")
+        self.Connection.RegisterEvent(event, callback_wrapper)
 
-    async def stop(self, drain=False):
+    async def stop(self):
         """
         Gracefully terminates the connection
         """
+        self.starting = False
         if self.stopping:
             return
         self.stopping = True
-        self.ready.clear()
-        try:
-            await self.wsConnection.send(b"DONE")
-            await self.wsConnection.close()
-        except Exception:
-            pass
-        try:
-            while (
-                isinstance(self.audioReceiver, AudioStreamTrack)
-                and self.audioReceiver.readyState != "ended"
-                and await asyncio.wait_for(self.getNextAudioFrame(), timeout=0.03)
-                and drain
-            ):
-                continue
-
-        except Exception:
-            pass
-        try:
-            while (
-                isinstance(self.videoReceiver, VideoStreamTrack)
-                and self.videoReceiver.readyState != "ended"
-                and await asyncio.wait_for(self.getNextVideoFrame(), timeout=0.03)
-                and drain
-            ):
-                continue
-        except Exception:
-            pass
-
-        try:
-            if self.enable_logging:
-                print("Stopping Simli Connection")
-            self.receiverTask.cancel()
-            if self.pingTask:
-                self.pingTask.cancel()
-            if self.enable_logging:
-                print("Websocket closed")
-            if self.pc.connectionState != "closed":
-                await self.pc.close()
-        except Exception:
-            pass
+        if self.Connection:
+            await self.Connection.stop()
 
     async def send(self, data: str | bytes):
         """
         Sends Audio data or control messages to the simli servers
         """
-        if not self.ready.is_set():
-            raise Exception("WSDC Not ready, please wait until self.ready is True")
-
+        if not self.Connection:
+            raise RuntimeError("Invalid State")
         try:
             for i in range(0, len(data), 6000):
-                await self.wsConnection.send(data[i : i + 6000])
+                await self.Connection.wsConnection.send(data[i : i + 6000])
         except websockets.WebSocketException:
-            if self.enable_logging:
-                print(
-                    "Websocket closed, stopping, please check the logs for more information"
-                )
+            logger.error("Websocket closed, stopping, please check the logs for more information")
             await self.stop()
 
     async def sendImmediate(self, data: bytes):
-        if not self.ready.is_set():
-            raise Exception("WSDC Not ready, please wait until self.ready is True")
-
+        if not self.Connection:
+            raise RuntimeError("Invalid State")
         try:
-            await self.wsConnection.send(b"PLAY_IMMEDIATE" + data[:128000])
+            await self.Connection.wsConnection.send(b"PLAY_IMMEDIATE" + data[:128000])
             size = len(data)
             if size > 128000:
                 for i in range(128000, size, 6000):
-                    await self.wsConnection.send(data[i : i + 6000])
+                    await self.Connection.wsConnection.send(data[i : i + 6000])
 
         except websockets.WebSocketException:
             if self.enable_logging:
-                print(
+                logger.error(
                     "Websocket closed, stopping, please check the logs for more information"
                 )
             await self.stop()
@@ -449,49 +225,17 @@ class SimliClient:
         """
         await self.send("SKIP")
 
-    async def getVideoStreamIterator(self, targetFormat: str = "rgb24"):
+    async def getVideoStreamIterator(
+        self, targetFormat: str = "rgb24"
+    ) -> AsyncGenerator[VideoFrame, None]:
         """
         Returns the video output as an async iterator with the specified format (default: rgb24)
 
         Refer to https://pyav.org for more information on the available formats
         """
-        await self.ready.wait()
-        first = True
-        s = time.time()
-        while True:
-            try:
-                frame = await asyncio.wait_for(
-                    self.videoReceiver.recv(), self.retryTimeout
-                )
-                if first:
-                    if frame is not None and frame.to_ndarray().sum() != 0:
-                        if self.enable_logging:
-                            print("FIRST VIDEO FRAME RECEIVED", time.time() - s)
-                        first = False
-            except asyncio.TimeoutError:
-                if first:
-                    await self.stop()
-                    await self.Initialize()
-                    continue
-                else:
-                    frame = None
-            except Exception as e:
-                if self.enable_logging:
-                    print("Video Stream Ended due to exception", e)
-                self.audioReceiver.stop()
-                self.videoReceiver.stop()
-                self.stop()
-                return
-            if first:
-                await self.stop()
-                await self.Initialize()
-                continue
-            if frame is None:
-                if self.enable_logging:
-                    print("Video Stream Ended")
-                self.audioReceiver.stop()
-                self.videoReceiver.stop()
-                return
+        if self.Connection is None:
+            raise RuntimeError("Invalid State")
+        async for frame in self.Connection.VideoFrameIterator():
             if targetFormat != "yuva420p":
                 frame = frame.reformat(format=targetFormat)
             yield frame
@@ -500,72 +244,21 @@ class SimliClient:
         """
         Returns the audio output as an async iterator
         """
+        if self.Connection is None:
+            raise RuntimeError("Invalid State")
         resampler = None
         if targetSampleRate != 48000:  # default WebRTC sample rate
-            resampler = AudioResampler(
-                format="s16", layout="stereo", rate=targetSampleRate
-            )
-        first = True
-        while True:
-            try:
-                currentReceiver = self.audioReceiver
-                frame = await asyncio.wait_for(
-                    self.audioReceiver.recv(), self.retryTimeout
-                )
-                if frame is not None and first:
-                    first = False
-            except asyncio.TimeoutError:
-                continue
-            except Exception as e:
-                self.audioReceiver.stop()
-                self.videoReceiver.stop()
-                if self.enable_logging:
-                    print("Audio Stream Ended due to exception", e)
-                return
-            if first:
-                while self.audioReceiver is currentReceiver:
-                    await asyncio.sleep(0.001)
-                continue
-            if not self.starting:
-                if frame is None:
-                    if self.enable_logging:
-                        print("Audio Stream Ended")
-                    self.audioReceiver.stop()
-                    self.videoReceiver.stop()
-                    return
-            if resampler:
-                frames = resampler.resample(frame)
-                for resampled_frame in frames:
+            resampler = AudioResampler(format="s16", layout="stereo", rate=targetSampleRate)
+
+        async for frame in self.Connection.AudioFrameIterator():
+            if resampler is not None:
+                for resampled_frame in resampler.resample(frame):
                     yield resampled_frame
             else:
                 yield frame
 
-    async def getNextVideoFrame(self):
-        """
-        Returns the next video frame in the specified format (default: rgb24)
-        """
-        return await self.videoReceiver.recv()
-
-    async def getNextAudioFrame(self):
-        """
-        Returns the next audio frame
-        """
-        return await self.audioReceiver.recv()
-
     async def __aenter__(self) -> Self:
-        await self.Initialize()
-        return self
+        return await self.Initialize()
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.stop()
-
-
-async def consumeTrack(
-    track: MediaStreamTrack,
-    connection: SimliClient,
-):
-    """
-    Used for debugging without dumping the output anywhere, just consumes the track and prints the data
-    """
-    while connection.run:
-        print(await track.recv())
