@@ -1,9 +1,20 @@
+from simli.simli import TransportMode
 import asyncio
-from simli import SimliClient, SimliConfig
-from simli.renderers import FileRenderer, NDArrayRenderer
+import logging
 import os
+import time
+
 from dotenv import load_dotenv
 
+import simli
+from simli import SimliClient, SimliConfig
+from simli.events import SimliEvent
+from simli.renderers.renderers import FileRenderer, NDArrayRenderer
+
+simli.logger.logger.disabled = False
+# logging.basicConfig(
+#     level=logging.DEBUG,
+# )
 load_dotenv(".env")
 
 with open("test_audio.raw", "rb") as f:
@@ -19,23 +30,25 @@ async def silentCallback():
 
 
 async def main():
+    s = time.time()
     async with SimliClient(
-        SimliConfig(
-            os.getenv("SIMLI_API_KEY", ""),  # API Key
+        api_key=os.getenv("SIMLI_API_KEY", ""),  # API Key
+        config=SimliConfig(
             os.getenv("SIMLI_FACE_ID", ""),  # Face ID
+            # model="artalk",
         ),
+        # transport_mode=TransportMode.LIVEKIT,
     ) as connection:
-        connection.registerSilentEventCallback(silentCallback)
-        connection.registerSpeakEventCallback(speakCallback)
-        await connection.send(audio)
-        await connection.sendSilence()
-        renderTask = asyncio.create_task(NDArrayRenderer(connection).render())
+        print(time.time() - s)
+        connection.registerEventCallback(SimliEvent.SPEAK, speakCallback)
+        await connection.sendSilence(4)
+        await connection.sendImmediate(audio)
+        renderTask = asyncio.create_task(FileRenderer(connection, filename="test.mp4").render())
+        # renderTask = asyncio.create_task(NDArrayRenderer(connection).render())
         await asyncio.sleep(10)
         print("Done")
-        await connection.stop()
-        videoOut, audioOut = await renderTask
-        print(videoOut.shape, audioOut.shape)
-        await renderTask
+
+    await renderTask
 
 
 asyncio.run(main())

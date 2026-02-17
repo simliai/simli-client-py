@@ -190,7 +190,7 @@ class P2PTransport(BaseTransport):
 
         wsConnection = websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
         self.wsConnection = await wsConnection.__aenter__()
-        self.RegisterEvent(SimliEvent.ANSWER, self.AwaitAnswer)
+        self.RegisterEvent(SimliEvent.CONNECTION_INFO, self.AwaitAnswer)
         self.RegisterEvent(SimliEvent.STOP, self.stop_callback)
         self.RegisterEvent(SimliEvent.ERROR, self.stop_callback)
 

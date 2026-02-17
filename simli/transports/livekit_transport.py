@@ -129,12 +129,10 @@ class LivekitTransport(BaseTransport):
         config: dict,
         simli_ws_url: str,
         simli_http_url: str,
-        enable_sfu: bool,
     ):
         super().__init__(run)
         self.simliWSURL = simli_ws_url
         self.simliHTTPURL = simli_http_url
-        self.enableSFU = enable_sfu
         self.config = config
         self.api_key = api_key
         self.joinInfoReceived = asyncio.Event()
@@ -173,7 +171,7 @@ class LivekitTransport(BaseTransport):
         wsConnection = websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
         self.wsConnection = await wsConnection.__aenter__()
 
-        self.RegisterEvent(SimliEvent.ANSWER, self.AwaitAnswer)
+        self.RegisterEvent(SimliEvent.CONNECTION_INFO, self.AwaitAnswer)
         self.RegisterEvent(SimliEvent.VIDEO_META, self.RegisterVideoInfo)
         self.RegisterEvent(SimliEvent.STOP, self.stop_callback)
         self.RegisterEvent(SimliEvent.ERROR, self.stop_callback)

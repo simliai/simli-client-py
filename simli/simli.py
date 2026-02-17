@@ -58,9 +58,7 @@ class SimliClient:
         self,
         api_key: str,
         config: SimliConfig,
-        latencyInterval: int = 60,
         simliURL: str = "https://api.simli.ai",
-        enable_logging: bool = True,
         retry_count: int = 3,
         retry_timeout: float = 15.0,
         enableSFU: bool = True,
@@ -71,7 +69,6 @@ class SimliClient:
         :param latencyInterval: Interval between pings to measure the latency between the client and the simli servers in seconds, set to 0 to disable
         :param simliURL: The URL of the Simli API, defaults to api.simli.ai. Don't change it unless you know what you are doing.
         """
-        self.enable_logging = enable_logging
         self.config: SimliConfig = config
         self.api_key = api_key
         self.ready: asyncio.Event = asyncio.Event()
@@ -79,7 +76,6 @@ class SimliClient:
         self.receiverTask: asyncio.Task = None
         self.pingTask: asyncio.Task = None
         self.stopping = False
-        self.latencyInterval = latencyInterval
         self.simliHTTPURL = simliURL
         self.simliWSURL = simliURL.replace("http", "ws")
         self.tryCount = retry_count
@@ -93,7 +89,7 @@ class SimliClient:
         self.transport_mode = transport_mode
         self.Connection = None
 
-    async def Initialize(
+    async def start(
         self,
     ) -> Self:
         """
@@ -129,7 +125,6 @@ class SimliClient:
                         self.config.__dict__,
                         self.simliWSURL,
                         self.simliHTTPURL,
-                        self.enableSFU,
                     )
                     await self.Connection.Connect()
                 case _:
@@ -146,7 +141,7 @@ class SimliClient:
             logger.info("Retrying Connection")
             self.transport_mode = TransportMode.LIVEKIT
             traceback.print_exc()
-            return await self.Initialize()
+            return await self.start()
         self.starting = False
         return self
 
@@ -206,10 +201,7 @@ class SimliClient:
                     await self.Connection.wsConnection.send(data[i : i + 6000])
 
         except websockets.WebSocketException:
-            if self.enable_logging:
-                logger.error(
-                    "Websocket closed, stopping, please check the logs for more information"
-                )
+            logger.error("Websocket closed, stopping, please check the logs for more information")
             await self.stop()
 
     async def sendSilence(self, duration: float = 0.1875):
@@ -258,7 +250,7 @@ class SimliClient:
                 yield frame
 
     async def __aenter__(self) -> Self:
-        return await self.Initialize()
+        return await self.start()
 
     async def __aexit__(self, exc_type, exc, tb):
         await self.stop()

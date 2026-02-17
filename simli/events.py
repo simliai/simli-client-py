@@ -9,7 +9,7 @@ class SimliEvent(StrEnum):
     ERROR = auto()
     SILENT = auto()
     SPEAK = auto()
-    ANSWER = auto()
+    CONNECTION_INFO = auto()
     VIDEO_META = auto()
     DESTINATION = auto()
     UNKNOWN = auto()
@@ -39,7 +39,7 @@ class SimliEvent(StrEnum):
                 return cls.SPEAK
             case _:
                 if "SDP" in value or "LIVEKIT" in value:
-                    return cls.ANSWER
+                    return cls.CONNECTION_INFO
                 elif "VIDEO_METADATA" in value:
                     return cls.VIDEO_META
                 elif "DESTINATION" in value:
