@@ -33,9 +33,9 @@ class BaseTransport(ABC):
 
     def __init__(self, run: Run):
         self.messageQueue: asyncio.Queue[SimliEvent] = asyncio.Queue()
-        self.callbacks: dict[SimliEvent, set[Callable[[str], Awaitable[None]]]] = {
-            event: set() for event in SimliEvent
-        }
+        self.callbacks: dict[
+            SimliEvent, set[Callable[[str], Awaitable[None]]]
+        ] = {event: set() for event in SimliEvent}
         self.run = run
 
     @abstractmethod
@@ -68,7 +68,9 @@ class BaseTransport(ABC):
                 try:
                     message = message.decode()
                 except Exception:
-                    logger.exception(f"UNABLE TO PARSE SERVER MESSAGE OF LENGTH {len(message)}")
+                    logger.exception(
+                        f"UNABLE TO PARSE SERVER MESSAGE OF LENGTH {len(message)}"
+                    )
                     continue
 
             received_event = SimliEvent(message)
@@ -81,8 +83,12 @@ class BaseTransport(ABC):
                     asyncio.ensure_future(event(message))
 
             else:
-                logger.exception(f"UNABLE TO PARSE SERVER MESSAGE OF LENGTH {len(message)}")
+                logger.exception(
+                    f"UNABLE TO PARSE SERVER MESSAGE OF LENGTH {len(message)}: {message}"
+                )
                 continue
 
-    def RegisterEvent(self, event: SimliEvent, callback: Callable[[str], Awaitable[None]]) -> None:
+    def RegisterEvent(
+        self, event: SimliEvent, callback: Callable[[str], Awaitable[None]]
+    ) -> None:
         self.callbacks[event].add(callback)

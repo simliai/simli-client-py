@@ -11,7 +11,7 @@ from av.audio.resampler import AudioResampler
 from .critical_exceptions import SimliExceptions
 from .events import SimliEvent
 from .logger import logger
-from .transports import base_transport, livekit_transport, p2p_transport
+from .transports import base_transport
 from .transports.base_transport import Run
 
 
@@ -73,8 +73,8 @@ class SimliClient:
         self.api_key = api_key
         self.ready: asyncio.Event = asyncio.Event()
         self.run = Run()
-        self.receiverTask: asyncio.Task = None
-        self.pingTask: asyncio.Task = None
+        self.receiverTask: asyncio.Task | None = None
+        self.pingTask: asyncio.Task | None = None
         self.stopping = False
         self.simliHTTPURL = simliURL
         self.simliWSURL = simliURL.replace("http", "ws")
@@ -109,6 +109,8 @@ class SimliClient:
 
             match self.transport_mode:
                 case TransportMode.P2P:
+                    from .transports import p2p_transport
+
                     self.Connection = p2p_transport.P2PTransport(
                         self.run,
                         self.api_key,
@@ -119,6 +121,8 @@ class SimliClient:
                     )
                     await self.Connection.Connect()
                 case TransportMode.LIVEKIT:
+                    from .transports import livekit_transport
+
                     self.Connection = livekit_transport.LivekitTransport(
                         self.run,
                         self.api_key,
@@ -129,9 +133,12 @@ class SimliClient:
                     await self.Connection.Connect()
                 case _:
                     raise ValueError("INVALID TRANSPORT MODE")
-
+            await self.clearBuffer()
         except Exception as e:
-            if len(e.args) > 0 and SimliExceptions(e.args[0]) != SimliExceptions.UNKNOWN_ERROR:
+            if (
+                len(e.args) > 0
+                and SimliExceptions(e.args[0]) != SimliExceptions.UNKNOWN_ERROR
+            ):
                 self.tryCount = 0
 
             self.tryCount -= 1
@@ -187,21 +194,27 @@ class SimliClient:
             for i in range(0, len(data), 6000):
                 await self.Connection.wsConnection.send(data[i : i + 6000])
         except websockets.WebSocketException:
-            logger.error("Websocket closed, stopping, please check the logs for more information")
+            logger.error(
+                "Websocket closed, stopping, please check the logs for more information"
+            )
             await self.stop()
 
     async def sendImmediate(self, data: bytes):
         if not self.Connection:
             raise RuntimeError("Invalid State")
         try:
-            await self.Connection.wsConnection.send(b"PLAY_IMMEDIATE" + data[:128000])
+            await self.Connection.wsConnection.send(
+                b"PLAY_IMMEDIATE" + data[:128000]
+            )
             size = len(data)
             if size > 128000:
                 for i in range(128000, size, 6000):
                     await self.Connection.wsConnection.send(data[i : i + 6000])
 
         except websockets.WebSocketException:
-            logger.error("Websocket closed, stopping, please check the logs for more information")
+            logger.error(
+                "Websocket closed, stopping, please check the logs for more information"
+            )
             await self.stop()
 
     async def sendSilence(self, duration: float = 0.1875):
@@ -240,7 +253,9 @@ class SimliClient:
             raise RuntimeError("Invalid State")
         resampler = None
         if targetSampleRate != 48000:  # default WebRTC sample rate
-            resampler = AudioResampler(format="s16", layout="stereo", rate=targetSampleRate)
+            resampler = AudioResampler(
+                format="s16", layout="stereo", rate=targetSampleRate
+            )
 
         async for frame in self.Connection.AudioFrameIterator():
             if resampler is not None:
