@@ -1,7 +1,9 @@
 import asyncio
+
 from av.audio.frame import AudioFrame
 from av.video.frame import VideoFrame
-from . import SimliClient
+
+from .. import SimliClient
 
 try:
     from livekit import rtc
@@ -32,12 +34,8 @@ class LivekitRenderer:
         self.height = height
         self.videoSource = rtc.VideoSource(width, height)
         self.audioSource = rtc.AudioSource(48000, 2, 20)
-        self.videoTrack = rtc.LocalVideoTrack.create_video_track(
-            "SimliVideo", self.videoSource
-        )
-        self.audioTrack = rtc.LocalAudioTrack.create_audio_track(
-            "SimliAudio", self.audioSource
-        )
+        self.videoTrack = rtc.LocalVideoTrack.create_video_track("SimliVideo", self.videoSource)
+        self.audioTrack = rtc.LocalAudioTrack.create_audio_track("SimliAudio", self.audioSource)
         self.CameraOptions = rtc.TrackPublishOptions(
             source=rtc.TrackSource.SOURCE_CAMERA,
             simulcast=True,
@@ -66,12 +64,8 @@ class LivekitRenderer:
 
     async def InitLivekit(self):
         await self.room.connect(url=self.room_url, token=self.room_token)
-        await self.room.local_participant.publish_track(
-            self.videoTrack, self.CameraOptions
-        )
-        await self.room.local_participant.publish_track(
-            self.audioTrack, self.MicrophoneOptions
-        )
+        await self.room.local_participant.publish_track(self.videoTrack, self.CameraOptions)
+        await self.room.local_participant.publish_track(self.audioTrack, self.MicrophoneOptions)
         print("Published Tracks")
 
     async def render(self):

@@ -6,7 +6,7 @@ import av.container
 import av.packet
 import av.video
 
-from .simli import SimliClient
+from ..simli import SimliClient
 
 
 class NDArrayRenderer:
@@ -16,8 +16,8 @@ class NDArrayRenderer:
         self.client = client
         self.videoBuffer: list[np.ndarray] = []
         self.audioBuffer: list[np.ndarray] = []
-        self.video: np.ndarray = None
-        self.audio: np.ndarray = None
+        self.video: np.ndarray | None = None
+        self.audio: np.ndarray | None = None
         self.np = np
 
     async def render(self):
@@ -52,7 +52,7 @@ class FileRenderer:
         client: SimliClient,
         filename: str = "output.mp4",
         videoCodec: str = "h264",
-        audioCodec: str = "aac",
+        audioCodec: str = "vorbis",
         outputFormat: str | None = "mp4",
     ):
         self.client = client
@@ -71,10 +71,16 @@ class FileRenderer:
         """
         self.container = av.open(self.filename, "w", format=self.outputFormat)
 
-        self.videoStream = self.container.add_stream(self.videoCodec, rate=30)
+        videoStream = self.container.add_stream(self.videoCodec, rate=30)
+        if not isinstance(videoStream, av.VideoStream):
+            raise RuntimeError()
+        self.videoStream = videoStream
         self.videoStream.pix_fmt = "yuv420p"
 
-        self.audioStream = self.container.add_stream(self.audioCodec)
+        audioStream = self.container.add_stream(self.audioCodec)
+        if not isinstance(audioStream, av.AudioStream):
+            raise RuntimeError()
+        self.audioStream = audioStream
         videoEncodeTask = asyncio.create_task(self.encodeVideo())
         audioEncodeTask = asyncio.create_task(self.encodeAudio())
         await asyncio.gather(videoEncodeTask, audioEncodeTask)
@@ -116,8 +122,8 @@ class LocalRenderer:
 
     def __init__(self, client: SimliClient, windowName: str = "Simli"):
         try:
-            import cv2  # type: ignore
-            import pyaudio  # type: ignore
+            import cv2  # ty:ignore[unresolved-import]
+            import pyaudio  # ty:ignore[unresolved-import]
         except ImportError:
             raise ImportError(
                 "cv2 and pyaudio are required for LocalRenderer, Install optional dependencies using \n\"pip install 'simli-ai[local]'\""
@@ -160,7 +166,8 @@ class LocalRenderer:
                 break
             self.videoBuffer.append(frame.to_ndarray())
             self.cv2.imshow(
-                "Simli", self.cv2.cvtColor(self.videoBuffer[0], self.cv2.COLOR_RGB2BGR)
+                "Simli",
+                self.cv2.cvtColor(self.videoBuffer[0], self.cv2.COLOR_RGB2BGR),
             )
             self.videoBuffer.pop(0)
             self.cv2.waitKey(1)

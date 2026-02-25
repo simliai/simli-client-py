@@ -11,7 +11,7 @@ def load_audio_file(filePath: str) -> bytes:
     Loads an audio file and returns the raw bytes. don't use this function for raw files.
     """
     contianer = av.open(filePath)
-    audioBytes: list[bytes] = []
+    audioBytes: list[np.ndarray] = []
     for frame in contianer.decode(audio=0):
         for resampledFrame in audioResampler.resample(frame):
             audioBytes.append(resampledFrame.to_ndarray())
@@ -35,7 +35,7 @@ def load_audio_file_base64(filePath: str) -> bytes:
     Loads an audio file and returns the raw bytes. don't use this function for raw files.
     """
     contianer = av.open(filePath)
-    audioBytes: list[bytes] = []
+    audioBytes: list[np.ndarray] = []
     for frame in contianer.decode(audio=0):
         for resampledFrame in audioResampler.resample(frame):
             audioBytes.append(resampledFrame.to_ndarray())
