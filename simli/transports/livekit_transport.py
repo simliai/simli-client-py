@@ -88,15 +88,14 @@ class VideoFrameReceiver:
                 self.firstStamp = lkFrame.timestamp_us
             frame = VideoFrame.from_numpy_buffer(
                 np.frombuffer(lkFrame.frame.data, dtype=np.uint8).reshape(
-                    lkFrame.frame.width, lkFrame.frame.height, 3
+                    lkFrame.frame.height, lkFrame.frame.width, 3
                 ),
                 format=LK_TO_AV_FORMAT[lkFrame.frame.type],
             )
             frame = frame.reformat(self.width, self.height, format="yuv420p")
             frame.time_base = fractions.Fraction(1, 90_000)
             frame.pts = int(
-                (lkFrame.timestamp_us - self.firstStamp)
-                * (MICROSECOND_TO_90KHZ_FACTOR)
+                (lkFrame.timestamp_us - self.firstStamp) * (MICROSECOND_TO_90KHZ_FACTOR)
             )
             self.frameCount += 1
             return frame
@@ -202,17 +201,11 @@ class LivekitTransport(BaseTransport):
                     ):
                         failReason = session_token_response.json()
                         logger.error(failReason["detail"])
-                        self.cached_session_token: str = failReason[
-                            "session_token"
-                        ]
+                        self.cached_session_token: str = failReason["session_token"]
                     raise Exception(SimliExceptions(failReason["detail"]))
-                self.cached_session_token: str = (
-                    session_token_response.json()
-                )["session_token"]
+                self.cached_session_token: str = (session_token_response.json())["session_token"]
 
-        url_parts = list(
-            urlparse.urlparse(f"{self.simliWSURL}/compose/webrtc/livekit")
-        )
+        url_parts = list(urlparse.urlparse(f"{self.simliWSURL}/compose/webrtc/livekit"))
         query = dict(urlparse.parse_qsl(url_parts[4]))
         query.update(
             {
@@ -221,9 +214,7 @@ class LivekitTransport(BaseTransport):
         )
         url_parts[4] = urlencode(query)
 
-        wsConnection = websockets.asyncio.client.connect(
-            urlparse.urlunparse(url_parts)
-        )
+        wsConnection = websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
         self.wsConnection = await wsConnection.__aenter__()
 
         self.RegisterEvent(SimliEvent.CONNECTION_INFO, self.AwaitAnswer)
