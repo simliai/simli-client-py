@@ -1,4 +1,4 @@
 from . import logger, renderers, utils
-from .simli import SimliClient, SimliConfig
+from .simli import CameraSetting, SimliClient, SimliConfig
 
-__all__ = ["SimliClient", "SimliConfig", "renderers", "utils", "logger"]
+__all__ = ["CameraSetting", "SimliClient", "SimliConfig", "logger", "renderers", "utils"]

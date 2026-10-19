@@ -71,11 +71,13 @@ class FileRenderer:
         """
         self.container = av.open(self.filename, "w", format=self.outputFormat)
 
-        videoStream = self.container.add_stream(self.videoCodec, rate=30)
+        videoStream = self.container.add_stream(self.videoCodec, rate=25)
         if not isinstance(videoStream, av.VideoStream):
             raise RuntimeError()
         self.videoStream = videoStream
         self.videoStream.pix_fmt = "yuv420p"
+        self.videoStream.width = 768
+        self.videoStream.height = 768
 
         audioStream = self.container.add_stream(self.audioCodec)
         if not isinstance(audioStream, av.AudioStream):
@@ -130,9 +132,7 @@ class LocalRenderer:
             )
 
         self.client = client
-        self.videoOutput = cv2.namedWindow(
-            windowName, cv2.WINDOW_NORMAL | cv2.WINDOW_AUTOSIZE
-        )
+        self.videoOutput = cv2.namedWindow(windowName, cv2.WINDOW_NORMAL | cv2.WINDOW_AUTOSIZE)
         cv2.resizeWindow(windowName, (512, 512))
         self.videoBuffer = []
 

@@ -1,11 +1,10 @@
-import time
 import asyncio
 import fractions
 import json
+import time
 import traceback
 import urllib.parse as urlparse
-from collections.abc import AsyncIterator
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator, AsyncIterator
 from urllib.parse import urlencode
 
 import numpy as np
@@ -203,7 +202,10 @@ class LivekitTransport(BaseTransport):
                         logger.error(failReason["detail"])
                         self.cached_session_token: str = failReason["session_token"]
                     raise Exception(SimliExceptions(failReason["detail"]))
-                self.cached_session_token: str = (session_token_response.json())["session_token"]
+                tokenResponse = session_token_response.json()
+                self.cached_session_token: str = tokenResponse["session_token"]
+                for warning in tokenResponse.get("warnings", []):
+                    logger.warning(warning)
 
         url_parts = list(urlparse.urlparse(f"{self.simliWSURL}/compose/webrtc/livekit"))
         query = dict(urlparse.parse_qsl(url_parts[4]))

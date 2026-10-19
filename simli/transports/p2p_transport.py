@@ -158,7 +158,10 @@ class P2PTransport(BaseTransport):
                         logger.error(failReason["detail"])
                         self.cached_session_token: str = failReason["session_token"]
                     raise Exception(SimliExceptions(failReason["detail"]))
-                self.cached_session_token: str = (session_token_response.json())["session_token"]
+                tokenResponse = session_token_response.json()
+                self.cached_session_token: str = tokenResponse["session_token"]
+                for warning in tokenResponse.get("warnings", []):
+                    logger.warning(warning)
                 self.iceJSON: Response = responses[1]
                 if not self.iceJSON.is_success:
                     logger.error("FAILED TO GATHER ICE SERVERS")

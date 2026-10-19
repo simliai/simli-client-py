@@ -1,8 +1,9 @@
 import asyncio
 import traceback
-from dataclasses import dataclass
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import AsyncGenerator, Awaitable, Callable, Optional, Self
+from typing import Optional, Self
 
 import websockets.asyncio.client
 from av import VideoFrame
@@ -26,10 +27,44 @@ class TransportMode(Enum):
 
 
 @dataclass
+class CameraSetting:
+    """
+    Camera offsets on top of the avatar's own framing, Trinity-2 faces only. The defaults are
+    neutral. A value outside its supported range is still applied, with a warning logged when
+    the session token is created.
+
+    Args:
+        pos_x_off (float): Moves the avatar right, in half canvas widths. Supported range -10 to 10.
+        pos_y_off (float): Moves the avatar down, in half canvas heights. Supported range -10 to 10.
+        pos_z_off (float):
+            Metres the camera backs away from the avatar (negative moves in).
+            Supported range -5 to 5.
+        rot_x_off (float): Degrees the camera tilts up (pitch). Supported range -180 to 180.
+        rot_y_off (float): Degrees the camera pans right (yaw). Supported range -180 to 180.
+        rot_z_off (float): Degrees the camera rolls clockwise. Supported range -180 to 180.
+        zoom (float): Multiplies the avatar's zoom; 1 is no change. Supported range above 0, up to 4.
+        orbit_x_off (float):
+            Degrees the camera orbits up over the avatar's head (elevation).
+            Supported range -80 to 80.
+        orbit_y_off (float):
+            Degrees the camera orbits round to its right (azimuth). Supported range -180 to 180.
+    """
+
+    pos_x_off: float = 0.0
+    pos_y_off: float = 0.0
+    pos_z_off: float = 0.0
+    rot_x_off: float = 0.0
+    rot_y_off: float = 0.0
+    rot_z_off: float = 0.0
+    zoom: float = 1.0
+    orbit_x_off: float = 0.0
+    orbit_y_off: float = 0.0
+
+
+@dataclass
 class SimliConfig:
     """
     Args:
-        apiKey (str): Simli API Key
         faceId (str): Simli Face ID. If using Trinity, you need to specify "faceId/emotionId" in the faceId field to use a different emotion than the default
         handleSilence (bool): Simli server keeps sending silent video when the input buffer is fully depleted. Turning this off makes the video freeze when you don't send in anything
         maxSessionLength (int):
@@ -37,6 +72,27 @@ class SimliConfig:
             even if it's speaking.
         maxIdleTime (int):
             Maximum duration the avatar is not speaking for before the avatar disconnects.
+        model (SimliModels): Deprecated, ignored by the server. Every session runs fasttalk.
+
+    The fields below are left out of the request when None, so the server's default applies.
+
+    Args:
+        sessionAggregator (str | None)
+        startFrame (int | None): Defaults to 0.
+        audioInputFormat (str | None): Defaults to "pcm16".
+        streaming_width (int | None):
+            Width of the streamed video in pixels, Trinity-2 faces only. At least 512, and with
+            streaming_height one of 1:1, 16:9 or 9:16. Defaults to 768.
+        streaming_height (int | None):
+            Height of the streamed video in pixels. See streaming_width. Defaults to 768.
+        avatar_position_x (float | None):
+            Where the avatar sits across the canvas, 0 (left) to 1 (right). Trinity-2 only.
+            Defaults to 0.5.
+        avatar_position_y (float | None):
+            Where the avatar sits down the canvas, 0 (top) to 1 (bottom). Trinity-2 only.
+            Defaults to 1.
+        camera (CameraSetting | None):
+            The camera the session starts with. Trinity-2 only. None keeps the avatar's framing.
     """
 
     faceId: str
@@ -44,6 +100,20 @@ class SimliConfig:
     maxSessionLength: int = 600
     maxIdleTime: int = 30
     model: SimliModels = SimliModels.fasttalk
+    sessionAggregator: str | None = None
+    startFrame: int | None = None
+    audioInputFormat: str | None = None
+    streaming_width: int | None = None
+    streaming_height: int | None = None
+    avatar_position_x: float | None = None
+    avatar_position_y: float | None = None
+    camera: CameraSetting | None = None
+
+    def toRequest(self) -> dict:
+        """
+        The /compose/token request body, without the fields left as None
+        """
+        return {key: value for key, value in asdict(self).items() if value is not None}
 
 
 class SimliClient:
@@ -114,7 +184,7 @@ class SimliClient:
                     self.Connection = p2p_transport.P2PTransport(
                         self.run,
                         self.api_key,
-                        self.config.__dict__,
+                        self.config.toRequest(),
                         self.simliWSURL,
                         self.simliHTTPURL,
                         self.enableSFU,
@@ -126,7 +196,7 @@ class SimliClient:
                     self.Connection = livekit_transport.LivekitTransport(
                         self.run,
                         self.api_key,
-                        self.config.__dict__,
+                        self.config.toRequest(),
                         self.simliWSURL,
                         self.simliHTTPURL,
                     )
@@ -135,10 +205,7 @@ class SimliClient:
                     raise ValueError("INVALID TRANSPORT MODE")
             await self.clearBuffer()
         except Exception as e:
-            if (
-                len(e.args) > 0
-                and SimliExceptions(e.args[0]) != SimliExceptions.UNKNOWN_ERROR
-            ):
+            if len(e.args) > 0 and SimliExceptions(e.args[0]) != SimliExceptions.UNKNOWN_ERROR:
                 self.tryCount = 0
 
             self.tryCount -= 1
@@ -194,27 +261,21 @@ class SimliClient:
             for i in range(0, len(data), 6000):
                 await self.Connection.wsConnection.send(data[i : i + 6000])
         except websockets.WebSocketException:
-            logger.error(
-                "Websocket closed, stopping, please check the logs for more information"
-            )
+            logger.error("Websocket closed, stopping, please check the logs for more information")
             await self.stop()
 
     async def sendImmediate(self, data: bytes):
         if not self.Connection:
             raise RuntimeError("Invalid State")
         try:
-            await self.Connection.wsConnection.send(
-                b"PLAY_IMMEDIATE" + data[:128000]
-            )
+            await self.Connection.wsConnection.send(b"PLAY_IMMEDIATE" + data[:128000])
             size = len(data)
             if size > 128000:
                 for i in range(128000, size, 6000):
                     await self.Connection.wsConnection.send(data[i : i + 6000])
 
         except websockets.WebSocketException:
-            logger.error(
-                "Websocket closed, stopping, please check the logs for more information"
-            )
+            logger.error("Websocket closed, stopping, please check the logs for more information")
             await self.stop()
 
     async def sendSilence(self, duration: float = 0.1875):
@@ -253,9 +314,7 @@ class SimliClient:
             raise RuntimeError("Invalid State")
         resampler = None
         if targetSampleRate != 48000:  # default WebRTC sample rate
-            resampler = AudioResampler(
-                format="s16", layout="stereo", rate=targetSampleRate
-            )
+            resampler = AudioResampler(format="s16", layout="stereo", rate=targetSampleRate)
 
         async for frame in self.Connection.AudioFrameIterator():
             if resampler is not None:
