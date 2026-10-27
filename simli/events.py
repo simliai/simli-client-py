@@ -1,3 +1,4 @@
+import json
 from enum import StrEnum, auto
 
 from .logger import logger
@@ -19,7 +20,10 @@ class SimliEvent(StrEnum):
     def _missing_(cls, value: object):
         if not isinstance(value, str) or len(value := value.strip()) == 0:
             raise ValueError()
-        value = value.upper().split()[0]
+        if value.startswith("{"):
+            return cls.fromJSON(value)
+        # The server's errors come as "ERROR: <message>"
+        value = value.upper().split()[0].rstrip(":")
         match value:
             case "ACK":
                 return cls.ACK
@@ -49,3 +53,21 @@ class SimliEvent(StrEnum):
                     return cls.STOP
                 else:
                     return cls.UNKNOWN
+
+    @classmethod
+    def fromJSON(cls, message: str) -> "SimliEvent":
+        """
+        The event a JSON message from the server is, by its keys: the server sends it without
+        spaces, so the worker id in a destination could read as anything else
+        """
+        try:
+            keys = json.loads(message).keys()
+        except (ValueError, AttributeError):
+            return cls.UNKNOWN
+        if "sdp" in keys or "livekit_url" in keys:
+            return cls.CONNECTION_INFO
+        if "video_metadata" in keys:
+            return cls.VIDEO_META
+        if "destination" in keys:
+            return cls.DESTINATION
+        return cls.UNKNOWN

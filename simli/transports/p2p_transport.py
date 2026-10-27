@@ -2,11 +2,9 @@ import asyncio
 import json
 import urllib.parse as urlparse
 from collections.abc import AsyncIterator
-from types import CoroutineType
-from typing import Any, AsyncGenerator
+from typing import AsyncGenerator
 from urllib.parse import urlencode
 
-import websockets.asyncio.client
 from aiortc import (
     RTCConfiguration,
     RTCIceServer,
@@ -15,12 +13,19 @@ from aiortc import (
 )
 from aiortc.rtcrtpreceiver import RemoteStreamTrack
 from av import AudioFrame, VideoFrame
-from httpx import AsyncClient, Response
+from httpx import AsyncClient
+from websockets import WebSocketException
 
-from ..critical_exceptions import SimliExceptions
+from ..critical_exceptions import SimliError
 from ..events import SimliEvent
 from ..logger import logger
-from .base_transport import BaseTransport, Run
+from .base_transport import (
+    BaseTransport,
+    Run,
+    apiRequest,
+    connectWebsocket,
+    createSessionToken,
+)
 
 
 class VideoFrameReceiver:
@@ -48,6 +53,9 @@ class VideoFrameReceiver:
                 frameTask.cancel()
                 await waitTask
                 return None
+            # The frame won: without this, every frame left a waiter pending
+            # until the session ended (~75 a second).
+            waitTask.cancel()
             frame = await frameTask
             if isinstance(frame, VideoFrame):
                 return frame
@@ -88,6 +96,9 @@ class AudioFrameReceiver:
                 frameTask.cancel()
                 await waitTask
                 return None
+            # The frame won: without this, every frame left a waiter pending
+            # until the session ended (~75 a second).
+            waitTask.cancel()
             frame = await frameTask
             if isinstance(frame, AudioFrame):
                 return frame
@@ -130,47 +141,25 @@ class P2PTransport(BaseTransport):
 
     async def Connect(self) -> None:
         async with AsyncClient() as client:
-            requests: list[CoroutineType[Any, Any, Response]] = []
-            if self.cached_session_token == "":
-                requests.append(
-                    client.post(
-                        f"{self.simliHTTPURL}/compose/token",
-                        json=self.config,
-                        headers={"x-simli-api-key": self.api_key},
-                    )
-                )
-            if len(self.iceConfig) == 0:
-                requests.append(
-                    client.get(
-                        f"{self.simliHTTPURL}/compose/ice",
-                        headers={"x-simli-api-key": self.api_key},
-                    )
-                )
-            if len(requests) > 0:
-                responses = await asyncio.gather(*requests)
-                session_token_response = responses[0]
-                if not session_token_response.is_success:
-                    if (
-                        session_token_response.status_code >= 400
-                        and session_token_response.status_code < 500
-                    ):
-                        failReason = session_token_response.json()
-                        logger.error(failReason["detail"])
-                        self.cached_session_token: str = failReason["session_token"]
-                    raise Exception(SimliExceptions(failReason["detail"]))
-                tokenResponse = session_token_response.json()
-                self.cached_session_token: str = tokenResponse["session_token"]
-                for warning in tokenResponse.get("warnings", []):
-                    logger.warning(warning)
-                self.iceJSON: Response = responses[1]
-                if not self.iceJSON.is_success:
-                    logger.error("FAILED TO GATHER ICE SERVERS")
-                    self.iceJSON.raise_for_status()
-
-                self.iceJSON.raise_for_status()
-                self.iceJSON = self.iceJSON.json()
-                for server in self.iceJSON:
-                    self.iceConfig.append(RTCIceServer(**server))
+            # The session token's error is the one to report when both fail
+            tokenResult, iceResult = await asyncio.gather(
+                createSessionToken(client, self.simliHTTPURL, self.api_key, self.config),
+                apiRequest(
+                    client,
+                    "GET",
+                    f"{self.simliHTTPURL}/compose/ice",
+                    "Getting the ICE servers",
+                    headers={"x-simli-api-key": self.api_key},
+                ),
+                return_exceptions=True,
+            )
+            if isinstance(tokenResult, BaseException):
+                raise tokenResult
+            if isinstance(iceResult, BaseException):
+                raise iceResult
+            self.cached_session_token = tokenResult
+            for server in iceResult.json():
+                self.iceConfig.append(RTCIceServer(**server))
 
         self.LocalPeer = RTCPeerConnection(RTCConfiguration(iceServers=self.iceConfig))
         self.LocalPeer.addTransceiver("audio", direction="recvonly")
@@ -191,29 +180,32 @@ class P2PTransport(BaseTransport):
         )
         url_parts[4] = urlencode(query)
 
-        wsConnection = websockets.asyncio.client.connect(urlparse.urlunparse(url_parts))
-        self.wsConnection = await wsConnection.__aenter__()
+        self.wsConnection = await connectWebsocket(urlparse.urlunparse(url_parts))
         self.RegisterEvent(SimliEvent.CONNECTION_INFO, self.AwaitAnswer)
         self.RegisterEvent(SimliEvent.STOP, self.stop_callback)
         self.RegisterEvent(SimliEvent.ERROR, self.stop_callback)
 
         self.receiverTask = asyncio.create_task(self.handleMessages())
-        await self.wsConnection.send(json.dumps(jsonOffer))
-        await asyncio.wait(
-            [
-                asyncio.create_task(self.answerReceived.wait()),
-                asyncio.create_task(self.run.event.wait()),
-            ],
-            return_when=asyncio.FIRST_COMPLETED,
-        )
-        if not self.answerReceived.is_set():
-            raise RuntimeError("Unable to connect to Simli")
-        await self.LocalPeer.setRemoteDescription(self.answer)
+        try:
+            await self.wsConnection.send(json.dumps(jsonOffer))
+        except WebSocketException as e:
+            raise await self.closedError("Sending the WebRTC offer to Simli") from e
+        await self.waitFor(self.answerReceived, "Getting the WebRTC answer from Simli")
+        try:
+            await self.LocalPeer.setRemoteDescription(self.answer)
+        except Exception as e:
+            # The answer is wrong, not the network: no retry fixes it
+            raise SimliError(f"Setting up WebRTC with Simli failed: {e!r}") from e
+        await self.waitFor(self.started, "Starting the Simli session")
         if not self.run.run:
-            raise RuntimeError("Connection Failed")
+            raise self.endedError("Starting the Simli session")
 
     async def AwaitAnswer(self, answer: str):
-        self.answer = RTCSessionDescription(**json.loads(answer))
+        try:
+            self.answer = RTCSessionDescription(**json.loads(answer))
+        except (ValueError, TypeError):
+            await self.unknownMessage(answer)
+            return
         self.answerReceived.set()
 
     def AudioFrameIterator(self) -> AsyncIterator[AudioFrame]:
@@ -244,6 +236,9 @@ class P2PTransport(BaseTransport):
 
     async def stop(self) -> None:
         self.run.run = False
+        if self.stopped:
+            return
+        self.stopped = True
         try:
             await self.LocalPeer.close()
         except Exception:
