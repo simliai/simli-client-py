@@ -1,4 +1,5 @@
 import asyncio
+import fractions
 
 import av
 import av.audio
@@ -7,6 +8,27 @@ import av.packet
 import av.video
 
 from ..simli import SimliClient
+
+# The video's time base in FileRenderer's file: a millisecond, fine enough that every frame keeps
+# its own timing, whatever the frame rate
+VIDEO_TIME_BASE = fractions.Fraction(1, 1000)
+
+
+def videoPts(frame: av.VideoFrame, lastPts: int | None) -> int:
+    """
+    frame's pts in VIDEO_TIME_BASE, after lastPts (the previous frame's, None for the first).
+
+    The session's video comes with WebRTC's 90 kHz timestamps, which jitter: a frame can arrive
+    stamped as early as, or earlier than, the one before it. The muxer refuses a pts that doesn't
+    increase, so such a frame goes one tick after the last instead. A frame without a timestamp
+    follows the last one.
+    """
+    if frame.pts is None or frame.time_base is None:
+        return 0 if lastPts is None else lastPts + 1
+    pts = round(frame.pts * frame.time_base / VIDEO_TIME_BASE)
+    if lastPts is not None and pts <= lastPts:
+        return lastPts + 1
+    return pts
 
 
 class NDArrayRenderer:
@@ -52,7 +74,7 @@ class FileRenderer:
         client: SimliClient,
         filename: str = "output.mp4",
         videoCodec: str = "h264",
-        audioCodec: str = "vorbis",
+        audioCodec: str = "aac",
         outputFormat: str | None = "mp4",
     ):
         self.client = client
@@ -75,6 +97,9 @@ class FileRenderer:
         if not isinstance(videoStream, av.VideoStream):
             raise RuntimeError()
         self.videoStream = videoStream
+        # Frames are encoded at their own timestamps (videoPts), not at 1/25 s steps: rounded to
+        # 1/25 s, jittered timestamps collided and the muxer failed
+        self.videoStream.codec_context.time_base = VIDEO_TIME_BASE
         self.videoStream.pix_fmt = "yuv420p"
         self.videoStream.width = 768
         self.videoStream.height = 768
@@ -91,12 +116,15 @@ class FileRenderer:
 
     async def encodeVideo(self):
         firstFrame = True
+        lastPts: int | None = None
         async for frame in self.client.getVideoStreamIterator("rgb24"):
             if firstFrame:
                 firstFrame = False
                 self.syncLock = True
             if frame is None:
                 break
+            lastPts = frame.pts = videoPts(frame, lastPts)
+            frame.time_base = VIDEO_TIME_BASE
             self.videoStream.width = frame.width
             self.videoStream.height = frame.height
             for packet in self.videoStream.encode(frame):
